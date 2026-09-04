@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-crontab"
+version = "0.0.1"
+description = "Schedule AI agent tasks, with a pull-only notification inbox"
+requires-python = ">=3.11"
+dependencies = [
+    "croniter>=2.0",
+    "mcp>=1.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+ai-crontab = "ai_crontab.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
