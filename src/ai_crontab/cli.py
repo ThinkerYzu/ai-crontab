@@ -89,6 +89,9 @@ def _parser():
     p.add_argument("run_id")
     p.set_defaults(handler=_run)
 
+    p = subs.add_parser("mcp", help="serve the agent's tools over stdio (started by a run)")
+    p.set_defaults(handler=_mcp)
+
     p = subs.add_parser("notify", help="the inbox")
     notify_subs = p.add_subparsers(dest="notify_command", required=True)
     q = notify_subs.add_parser("list", help="unread notifications")
@@ -197,6 +200,25 @@ def _run(cfg, store, args):
         print(f"no active run {args.run_id}", file=sys.stderr)
         return 1
     print(state)
+
+
+def _mcp(cfg, store, args):
+    """Serve one run's tools until the agent that started us disconnects.
+
+    Not run by hand: the identity the tools act under comes from the
+    environment the supervisor's per-run MCP config sets, and without it there
+    is no run to act for. Nothing may be printed to stdout from here, which is
+    why the refusal goes to stderr.
+
+    The MCP SDK is imported here rather than at the top of the module so that
+    the tick, which cron may run every minute, does not pay to load it.
+    """
+    from . import mcp_server
+    try:
+        mcp_server.serve(cfg)
+    except RuntimeError as exc:
+        print(f"ai-crontab: {exc}", file=sys.stderr)
+        return 1
 
 
 def _notify_list(cfg, store, args):

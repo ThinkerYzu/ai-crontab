@@ -40,6 +40,22 @@ def test_a_run_with_something_to_say_files_exactly_one(cfg, store, make_task):
     assert notes[0].task_id == task.id, "a run files as its own task, never another"
 
 
+def test_an_agent_that_waits_for_more_input_is_still_let_go(cfg, store, make_task):
+    """A finished turn ends the run, rather than the deadline ending it.
+
+    Real `claude --input-format stream-json` keeps reading stdin after its
+    turn, so an agent that did everything asked of it would otherwise be killed
+    at its limit and recorded as a timeout. The first live run against the real
+    CLI did exactly that.
+    """
+    task = make_task("lingerer")
+    started = time.monotonic()
+    run = start(cfg, store, task)
+
+    assert run.state == model.OK
+    assert time.monotonic() - started < task.time_limit_sec, "waited for the deadline"
+
+
 def test_a_failing_run_is_recorded_and_changes_nothing_else(cfg, store, make_task):
     """FR-15: failures are recorded, never acted on."""
     task = make_task("crash")

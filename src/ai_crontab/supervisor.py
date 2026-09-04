@@ -96,6 +96,7 @@ class _Reader(threading.Thread):
         self.transcript_path = transcript_path
         self.summary = None
         self.result = None
+        self.finished = threading.Event()
 
     def run(self):
         transcript = open(self.transcript_path, "a")
@@ -120,6 +121,7 @@ class _Reader(threading.Thread):
                     self.summary = block["text"].strip()[:SUMMARY_LIMIT]
         elif event.get("type") == "result":
             self.result = event
+            self.finished.set()
 
 
 def supervise(cfg, store, run_id, now=None):
@@ -169,7 +171,7 @@ def supervise(cfg, store, run_id, now=None):
         reader.start()
         _send(proc, user_message(opening))
 
-        state, exit_code, error = _wait(cfg, proc, warn_at, deadline)
+        state, exit_code, error = _wait(cfg, proc, reader, warn_at, deadline)
     except Exception as exc:  # a supervisor that dies silently is the one thing we cannot have
         state, error = model.FAILED, f"{type(exc).__name__}: {exc}"
     finally:
@@ -192,7 +194,7 @@ def supervise(cfg, store, run_id, now=None):
     return state
 
 
-def _wait(cfg, proc, warn_at, deadline):
+def _wait(cfg, proc, reader, warn_at, deadline):
     """Poll the agent until it exits or its deadline arrives.
 
     Pushes the wrap-up message once, at `warn_at`, and does not wait for a
@@ -201,12 +203,25 @@ def _wait(cfg, proc, warn_at, deadline):
     actually guarantees the run ends.
     """
     warned = False
+    closed = False
     while True:
         code = proc.poll()
         if code is not None:
             return (model.OK if code == 0 else model.FAILED), code, None
         now = utcnow()
-        if not warned and now >= warn_at:
+
+        # The agent has answered, so close its input and let it exit.
+        #
+        # `--input-format stream-json` leaves claude reading stdin after it
+        # finishes a turn, waiting for another message that is never coming.
+        # Without this every successful run sits until its deadline and is
+        # recorded as a timeout, which is what the first live run did. The
+        # result event is the agent saying its turn is over, and it is the only
+        # signal that the work is done rather than merely slow.
+        if not closed and reader.finished.is_set():
+            _close_stdin(proc)
+            closed = True
+        elif not warned and now >= warn_at:
             _send(proc, user_message(
                 prompt.wrap_up((deadline - now).total_seconds())
             ))
@@ -222,7 +237,15 @@ def _send(proc, line):
     try:
         proc.stdin.write(line)
         proc.stdin.flush()
-    except (BrokenPipeError, ValueError):
+    except (BrokenPipeError, ValueError, OSError):
+        pass
+
+
+def _close_stdin(proc):
+    """Close the agent's input, which is what lets it exit of its own accord."""
+    try:
+        proc.stdin.close()
+    except (BrokenPipeError, ValueError, OSError):
         pass
 
 

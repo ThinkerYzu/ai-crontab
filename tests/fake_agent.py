@@ -106,6 +106,17 @@ def main():
                 result("wrapped up")
                 return 0
 
+    if mode == "lingerer":
+        # Finish the turn and then go on reading stdin, which is what real
+        # `claude --input-format stream-json` does: it waits for another
+        # message rather than exiting. Only a supervisor that closes the pipe
+        # once the turn is over will see this run end before its deadline.
+        assistant("done")
+        result("done")
+        while read_message(sys.stdin) is not None:
+            pass
+        return 0
+
     if mode == "spawner":
         # Leave a child running in this process group, then hang. Only a
         # process-group kill takes the child with it.
