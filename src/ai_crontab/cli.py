@@ -92,6 +92,10 @@ def _parser():
     p = subs.add_parser("mcp", help="serve the agent's tools over stdio (started by a run)")
     p.set_defaults(handler=_mcp)
 
+    p = subs.add_parser("web", help="serve the local web interface on loopback")
+    p.add_argument("--port", type=int, help="default from config (8474)")
+    p.set_defaults(handler=_web)
+
     p = subs.add_parser("notify", help="the inbox")
     notify_subs = p.add_subparsers(dest="notify_command", required=True)
     q = notify_subs.add_parser("list", help="unread notifications")
@@ -219,6 +223,29 @@ def _mcp(cfg, store, args):
     except RuntimeError as exc:
         print(f"ai-crontab: {exc}", file=sys.stderr)
         return 1
+
+
+def _web(cfg, store, args):
+    """Serve the web interface until interrupted.
+
+    Nothing schedules this and nothing depends on it: ticks run whether it is
+    up or not, so leaving it down costs only the view.
+
+    FastAPI is imported here rather than at the top of the module for the
+    reason the MCP SDK is, and for one more: the web dependencies are an
+    optional extra, so a plain install has to keep working. A missing extra
+    must fail on this command and on nothing else.
+    """
+    if args.port:
+        cfg.web_port = args.port
+    try:
+        from .web import app as web_app
+    except ImportError as exc:
+        print(f"ai-crontab: the web interface needs its extra: "
+              f"pip install 'ai-crontab[web]' ({exc})", file=sys.stderr)
+        return 1
+    print(f"ai-crontab: http://127.0.0.1:{cfg.web_port}  (loopback only)")
+    web_app.serve(cfg)
 
 
 def _notify_list(cfg, store, args):

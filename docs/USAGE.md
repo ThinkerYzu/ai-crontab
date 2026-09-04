@@ -270,6 +270,48 @@ kill at ten minutes is the only guaranteed ending.
 
 ---
 
+## The web interface
+
+Optional, and installed separately:
+
+```bash
+pip install 'ai-crontab[web]'
+ai-crontab web            # http://127.0.0.1:8474
+```
+
+It shows the schedule, a page per task with its prompt and handoff, the inbox,
+and a page per run rendering that run's transcript as turns, with the tool
+calls, their results, and what it cost. Reading a transcript is the thing the
+command line does badly, and it is most of why the interface exists.
+
+Nothing schedules the server and nothing depends on it. Ticks run whether it is
+up or not, so leaving it down costs only the view.
+
+**It listens on loopback and nowhere else, and it has no login.** That is safe
+because of what it refuses, so it is worth knowing what those refusals are
+before you change anything about how it is served:
+
+- A request whose `Host` header is not loopback is refused, which stops a
+  request that reached the port under another name.
+- A request that would change something must carry an `X-AI-Crontab` header and
+  must not declare somebody else's `Origin`.
+
+The second one matters more than it looks. A task is a prompt that runs with
+every tool pre-granted, so a form that writes a task prompt is a form that runs
+code on your machine, and any page open in any browser can send a request to a
+port on `127.0.0.1`. A password would not help, because your browser would
+attach the cookie to that request for you. A header outside the CORS safelist
+would need a preflight this server never approves, so the request is never
+sent.
+
+Do not put this behind a reverse proxy, and do not change the bind address. It
+has no authentication because it does not need any at loopback, and exposing it
+would remove the one thing that makes that true.
+
+Current version reads; it does not yet write.
+
+---
+
 ## Configuration
 
 `~/.ai-crontab/config.toml`. Every duration is in seconds.
@@ -286,6 +328,8 @@ kill at ten minutes is the only guaranteed ending.
 | `prune_every_sec` | `86400` | How often a tick prunes |
 | `startup_grace_sec` | `60` | How long a run with no supervisor pid yet is left alone |
 | `timezone` | machine local | The zone cron expressions are read in |
+| `tick_interval_sec` | `300` | How often your cron line runs a tick. Display only |
+| `web_port` | `8474` | The port `ai-crontab web` listens on, always on loopback |
 
 `model` is unset on purpose. A run then takes whatever `claude` picks, so the
 choice follows the CLI instead of being frozen in a config file. Set it only to
@@ -293,6 +337,11 @@ hold runs to one model deliberately.
 
 A task over the concurrency ceiling stays due rather than being dropped, so the
 next tick starts it.
+
+`tick_interval_sec` is what your cron line does, not what ai-crontab does.
+Nothing here can check it, because you own that line. It exists so the web
+interface can say the scheduler is overdue rather than only saying when it last
+ran, and getting it wrong makes that one indicator wrong and nothing else.
 
 ---
 

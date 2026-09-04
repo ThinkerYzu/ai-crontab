@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}{{ task.name }} - ai-crontab{% endblock %}
+{% block content %}
+<h1>{{ task.name }}</h1>
+<p class="dim">{{ task.id }}
+  {% if not task.enabled %}<span class="tag">disabled</span>{% endif %}
+  &middot; added by {{ task.created_by }}</p>
+
+<table class="fields">
+  <tr><th>Schedule</th><td><code>{{ task.schedule }}</code> ({{ task.schedule_kind }})</td></tr>
+  <tr><th>Next run</th><td>{{ view.next_run.strftime('%a %d %b %Y %H:%M %Z') if view.next_run else 'not scheduled' }}</td></tr>
+  <tr><th>Working dir</th><td><code>{{ task.working_dir }}</code></td></tr>
+  <tr><th>Time limit</th><td>{{ task.time_limit_sec }}s</td></tr>
+</table>
+
+<h2>Prompt</h2>
+<pre class="prompt">{{ task.prompt }}</pre>
+
+<h2>Handoff</h2>
+{% if handoff %}<pre class="handoff">{{ handoff }}</pre>
+{% else %}<p class="empty">Nothing left for the next run yet.</p>{% endif %}
+
+<h2>Runs</h2>
+{% if not runs %}
+  <p class="empty">No runs yet.</p>
+{% else %}
+<table>
+  <tr><th>Started</th><th>State</th><th>Took</th><th>Cost</th><th></th></tr>
+  {% for v in runs %}
+  <tr>
+    <td>{{ v.started.strftime('%d %b %H:%M') }}</td>
+    <td><span class="state {{ v.run.state }}">{{ v.run.state }}</span></td>
+    <td>{{ v.took_sec ~ 's' if v.took_sec is not none else '-' }}</td>
+    <td>{{ '$%.2f' % v.cost if v.cost else '-' }}</td>
+    <td><a href="/runs/{{ v.run.id }}">transcript</a></td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+{% endblock %}

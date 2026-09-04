@@ -49,7 +49,7 @@ over your home directory or a repository you care about.
 git clone https://github.com/ThinkerYzu/ai-crontab
 cd ai-crontab
 python3 -m venv .venv && . .venv/bin/activate
-pip install -e .
+pip install -e .          # add [web] for the browser interface
 ```
 
 Then point it at your `claude` binary, because cron's `PATH` will not find one
@@ -143,6 +143,15 @@ It is what guarantees a broken run can never be mistaken for a quiet one.
 and modify tasks, including its own. That is what turns "check back in three
 days if nobody has replied" into something the agent arranges for itself.
 
+**There is a web interface, and it stays on loopback.** `ai-crontab web` serves
+the schedule, the inbox, and a page per run that renders that run's transcript
+as turns, which is the one thing the command line does badly. It is optional,
+nothing depends on it, and it has no login because it listens on `127.0.0.1`
+only and refuses any request that did not come from its own pages. Read
+[the section in docs/USAGE.md](docs/USAGE.md#the-web-interface) before changing
+how it is served: a task is a prompt that runs with every tool pre-granted, so
+exposing that port is not the small thing it looks like.
+
 ## Documentation
 
 - **[docs/USAGE.md](docs/USAGE.md)** covers every command, the config file, how
@@ -152,8 +161,8 @@ days if nobody has replied" into something the agent arranges for itself.
 ## Development
 
 ```bash
-pip install -e ".[dev]"
-pytest -q          # 74 tests, about 18 seconds
+pip install -e ".[dev,web]"
+pytest -q          # 100 tests, about 18 seconds
 ```
 
 The suite needs no network and starts no agent that costs money. A fake agent

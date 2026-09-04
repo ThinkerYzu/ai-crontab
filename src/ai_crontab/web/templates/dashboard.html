@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Schedule</h1>
+
+<p class="health {{ health.state }}">
+  {% if health.state == 'unknown' %}
+    No tick recorded yet. Is the cron line installed?
+  {% elif health.state == 'late' %}
+    Scheduler last ticked {{ health.ago_sec // 60 }} min ago, longer than the
+    {{ cfg.tick_interval_sec // 60 }} min interval in config. Nothing is due to run.
+  {% else %}
+    Scheduler ticked {{ health.ago_sec }}s ago.
+  {% endif %}
+</p>
+
+{% if active %}
+<p class="running">{{ active | length }} run{{ '' if active | length == 1 else 's' }} in flight:
+  {% for run in active %}<a href="/runs/{{ run.id }}">{{ run.id }}</a>{% if not loop.last %}, {% endif %}{% endfor %}
+</p>
+{% endif %}
+
+{% if not tasks %}
+  <p class="empty">No tasks. Add one with <code>ai-crontab add</code>.</p>
+{% else %}
+<table>
+  <tr><th>Task</th><th>Schedule</th><th>Next run</th><th>Last run</th></tr>
+  {% for v in tasks %}
+  <tr{% if not v.task.enabled %} class="off"{% endif %}>
+    <td><a href="/tasks/{{ v.task.id }}">{{ v.task.name }}</a>
+        {% if not v.task.enabled %}<span class="tag">disabled</span>{% endif %}</td>
+    <td><code>{{ v.task.schedule }}</code></td>
+    <td>{{ v.next_run.strftime('%a %d %b %H:%M') if v.next_run else '-' }}</td>
+    <td>
+      {% if v.last_run %}
+        <a href="/runs/{{ v.last_run.run.id }}" class="state {{ v.last_run.run.state }}">{{ v.last_run.run.state }}</a>
+        <span class="dim">{{ v.last_run.started.strftime('%d %b %H:%M') }}</span>
+      {% else %}<span class="dim">never</span>{% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+{% endblock %}

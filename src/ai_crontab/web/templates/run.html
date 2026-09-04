@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}{{ run.id }} - ai-crontab{% endblock %}
+{% block content %}
+<h1>{% if task %}<a href="/tasks/{{ task.id }}">{{ task.name }}</a>{% else %}{{ run.task_id }}{% endif %}</h1>
+<p class="dim">{{ run.id }} &middot; started {{ view.started.strftime('%a %d %b %Y %H:%M %Z') }}
+  &middot; <span class="state {{ run.state }}">{{ run.state }}</span>
+  {% if view.took_sec is not none %}&middot; {{ view.took_sec }}s{% endif %}</p>
+
+{% if run.error %}<p class="error">{{ run.error }}</p>{% endif %}
+
+<table class="fields">
+  <tr><th>Turns</th><td>{{ transcript.num_turns if transcript.finished else 'no result event: the run did not finish on its own' }}</td></tr>
+  <tr><th>Cost</th><td>{{ '$%.4f' % transcript.cost_usd if transcript.cost_usd else '-' }}</td></tr>
+  <tr><th>Model</th><td>{{ transcript.model or '-' }}</td></tr>
+  {% if transcript.usage %}
+  <tr><th>Tokens</th><td class="dim">
+    in {{ transcript.usage.input }} &middot;
+    cache write {{ transcript.usage.cache_write }} &middot;
+    cache read {{ transcript.usage.cache_read }} &middot;
+    out {{ transcript.usage.output }}{% if transcript.usage.thinking %} ({{ transcript.usage.thinking }} thinking){% endif %}
+  </td></tr>
+  {% endif %}
+</table>
+
+{% if transcript.truncated %}
+<p class="warn">The transcript ends mid-line. A run killed at its time limit
+  leaves one, so this is expected for a timeout and suspicious otherwise.</p>
+{% endif %}
+
+{% if transcript.result_text %}
+<h2>What it said at the end</h2>
+<pre class="result">{{ transcript.result_text }}</pre>
+{% endif %}
+
+<h2>Turns</h2>
+{% if not transcript.rows %}
+  <p class="empty">Nothing in the transcript. The agent was killed before it spoke.</p>
+{% else %}
+<ol class="turns">
+  {% for row in transcript.rows %}
+  <li class="row {{ row.kind }}{{ ' failed' if row.is_error else '' }}">
+    <details{% if row.kind == 'text' %} open{% endif %}>
+      <summary><span class="kind">{{ row.kind.replace('_', ' ') }}</span> {{ row.title }}</summary>
+      <pre>{{ row.body }}</pre>
+    </details>
+  </li>
+  {% endfor %}
+</ol>
+{% endif %}
+{% endblock %}

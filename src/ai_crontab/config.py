@@ -39,6 +39,12 @@ class Config:
     `model` is None on purpose: a run then gets whatever `claude` itself
     picks, so the choice tracks the CLI rather than being frozen here. Set it
     only to hold a run to one model deliberately.
+
+    `tick_interval_sec` is what the cron line does, not what this tool does:
+    nothing here can check it, because you own the cron line. It exists so the
+    web interface can say the scheduler is overdue rather than only saying when
+    it last ran. Getting it wrong makes that one indicator wrong and affects
+    nothing else.
     """
 
     root: Path = field(default_factory=default_root)
@@ -52,6 +58,8 @@ class Config:
     claude_bin: str = "claude"
     model: str | None = None
     timezone: str | None = None
+    tick_interval_sec: int = 300
+    web_port: int = 8474
 
     @property
     def db_path(self):

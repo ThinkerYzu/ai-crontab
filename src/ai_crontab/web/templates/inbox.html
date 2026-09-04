@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Inbox - ai-crontab{% endblock %}
+{% block content %}
+<h1>Inbox</h1>
+<p class="dim">
+  {% if show_all %}Everything. <a href="/inbox">Unread only</a>
+  {% else %}Unread only. <a href="/inbox?all">Show everything</a>{% endif %}
+</p>
+
+{% if not notes %}
+  <p class="empty">
+    {% if show_all %}No notifications.
+    {% else %}Nothing unread. A quiet inbox is the normal result: a task with
+    nothing to report files nothing.{% endif %}
+  </p>
+{% else %}
+{% for v in notes %}
+<article class="note{{ ' read' if not v.note.is_unread else '' }}">
+  <h2>{{ v.note.title }}</h2>
+  <p class="dim">
+    <span class="priority {{ v.note.priority }}">{{ v.note.priority }}</span>
+    &middot; <a href="/tasks/{{ v.note.task_id }}">{{ v.task_name }}</a>
+    &middot; {{ v.created.strftime('%a %d %b %H:%M') }}
+    {% if v.note.run_id %}&middot; <a href="/runs/{{ v.note.run_id }}">the run</a>{% endif %}
+    {% if not v.note.is_unread %}&middot; read{% endif %}
+  </p>
+  {% if v.note.body %}<pre>{{ v.note.body }}</pre>{% endif %}
+</article>
+{% endfor %}
+{% endif %}
+{% endblock %}
