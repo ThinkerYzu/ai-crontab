@@ -6,12 +6,13 @@ and loopback plus no login is safe only while these hold.
 """
 
 import json
+import time
 from datetime import timedelta
 
 import pytest
 from fastapi.testclient import TestClient
 
-from ai_crontab import config, core
+from ai_crontab import config, core, tick
 from ai_crontab.web import transcript
 from ai_crontab.web.app import make_app
 
@@ -280,3 +281,287 @@ def test_config_is_re_read_between_requests(client, cfg):
     (cfg.root / "config.toml").write_text("tick_interval_sec = 900\n")
     body = client.get("/", headers=SAME_SITE).text
     assert "15 min interval" in body or "No tick recorded" in body
+
+
+# -- what a write refuses -----------------------------------------------
+#
+# SC-18. These matter more than the ones below them: a task is a prompt run
+# with every tool pre-granted, so a route that creates one is a route that runs
+# code on this machine, and the only thing standing between that and a page you
+# have open in another tab is what these assert.
+
+NEW_TASK = {"name": "from-the-browser", "prompt": "quiet", "schedule": "0 9 * * *"}
+
+
+def test_a_foreign_page_cannot_create_a_task(client, store):
+    reply = client.post("/tasks/new", data=NEW_TASK, headers={
+        "host": "127.0.0.1:8474",
+        "x-ai-crontab": "1",
+        "origin": "https://evil.example",
+    })
+    assert reply.status_code == 403
+    assert store.find_task("from-the-browser") is None
+
+
+def test_a_form_post_without_the_header_cannot_create_a_task(client, store):
+    """A plain HTML form is exactly what a foreign page can send, and cannot
+    add a header to. That is why the interface posts with fetch instead."""
+    reply = client.post("/tasks/new", data=NEW_TASK,
+                        headers={"host": "127.0.0.1:8474"})
+    assert reply.status_code == 403
+    assert store.find_task("from-the-browser") is None
+
+
+def test_the_interface_can_create_a_task(client, store):
+    reply = client.post("/tasks/new", data=NEW_TASK, headers=SAME_SITE)
+    assert reply.status_code == 200
+    task = store.find_task("from-the-browser")
+    assert task is not None
+    assert reply.json()["redirect"] == f"/tasks/{task.id}"
+
+
+# -- the writes ---------------------------------------------------------
+
+def test_a_new_task_takes_the_defaults_it_was_not_given(client, cfg, store):
+    client.post("/tasks/new", data=NEW_TASK, headers=SAME_SITE)
+    task = store.find_task("from-the-browser")
+    assert task.time_limit_sec == cfg.time_limit_sec
+    assert task.enabled
+    assert task.next_run is not None
+
+
+def test_a_duplicate_name_is_answered_not_raised(client, make_task):
+    """The CLI answers this with one line, so the browser gets the same line."""
+    make_task(name="taken")
+    reply = client.post("/tasks/new", headers=SAME_SITE,
+                        data={**NEW_TASK, "name": "taken"})
+    assert reply.status_code == 400
+    assert "already exists" in reply.json()["detail"]
+
+
+def test_a_schedule_that_does_not_parse_is_answered_not_raised(client):
+    reply = client.post("/tasks/new", headers=SAME_SITE,
+                        data={**NEW_TASK, "schedule": "every other tuesday"})
+    assert reply.status_code == 400
+    assert "not a cron expression" in reply.json()["detail"]
+
+
+def test_a_missing_field_is_a_400(client):
+    reply = client.post("/tasks/new", headers=SAME_SITE,
+                        data={"name": "nameless", "schedule": "0 9 * * *"})
+    assert reply.status_code == 400
+    assert "prompt is required" in reply.json()["detail"]
+
+
+def test_editing_changes_only_what_the_form_carried(client, store, make_task):
+    task = make_task(name="editable")
+    client.post(f"/tasks/{task.id}", headers=SAME_SITE,
+                data={"prompt": "quiet, but rewritten"})
+    changed = store.get_task(task.id)
+    assert changed.prompt == "quiet, but rewritten"
+    assert changed.name == "editable"
+    assert changed.schedule == task.schedule
+
+
+def test_a_new_schedule_moves_the_next_run(client, store, make_task):
+    task = make_task(name="rescheduled", schedule="*/5 * * * *")
+    client.post(f"/tasks/{task.id}", headers=SAME_SITE, data={"schedule": "0 9 * * *"})
+    changed = store.get_task(task.id)
+    assert changed.schedule == "0 9 * * *"
+    assert changed.next_run != task.next_run
+
+
+def test_disabling_and_enabling_are_the_same_route(client, store, make_task):
+    """Both are one field on the task, so both are `modify`, as in the CLI."""
+    task = make_task(name="switchable")
+    client.post(f"/tasks/{task.id}", headers=SAME_SITE, data={"enabled": "false"})
+    off = store.get_task(task.id)
+    assert not off.enabled and off.next_run is None
+
+    client.post(f"/tasks/{task.id}", headers=SAME_SITE, data={"enabled": "true"})
+    on = store.get_task(task.id)
+    assert on.enabled and on.next_run is not None
+
+
+def test_deleting_a_task_takes_its_directory_with_it(client, cfg, store, make_task):
+    task = make_task(name="doomed")
+    core.write_handoff(cfg, task.id, "something to lose")
+    reply = client.post(f"/tasks/{task.id}/delete", headers=SAME_SITE)
+    assert reply.json()["redirect"] == "/"
+    assert store.get_task(task.id) is None
+    assert not cfg.task_dir(task.id).exists()
+
+
+def test_a_write_to_an_unknown_task_is_a_404(client):
+    assert client.post("/tasks/nope", headers=SAME_SITE,
+                       data={"enabled": "false"}).status_code == 404
+
+
+def test_run_now_starts_a_run(client, store, make_task, monkeypatch):
+    started = _record_spawns(monkeypatch)
+    task = make_task(name="impatient")
+    reply = client.post(f"/tasks/{task.id}/run", headers=SAME_SITE)
+    assert reply.status_code == 200
+    assert store.count_active_runs() == 1
+    assert reply.json()["redirect"] == f"/runs/{started[0]}"
+
+
+def test_run_now_declines_when_a_run_is_already_in_flight(client, store,
+                                                          make_task, monkeypatch):
+    """The overlap rule is the store's, not the interface's: `claim_run`
+    refuses, and 409 is that refusal said in HTTP."""
+    _record_spawns(monkeypatch)
+    task = make_task(name="already-going")
+    client.post(f"/tasks/{task.id}/run", headers=SAME_SITE)
+    assert client.post(f"/tasks/{task.id}/run",
+                       headers=SAME_SITE).status_code == 409
+    assert store.count_active_runs() == 1
+
+
+def _record_spawns(monkeypatch):
+    """Note which runs would have been launched, without launching one.
+
+    A route handler runs on a thread of its own, so a stand-in that touched the
+    test's own store connection would fail on SQLite's thread check rather than
+    on anything the route did wrong.
+    """
+    started = []
+    monkeypatch.setattr("ai_crontab.tick.spawn_supervisor",
+                        lambda cfg, run_id: started.append(run_id))
+    return started
+
+
+def test_a_notification_can_be_marked_read_and_deleted(client, store, make_task):
+    task = make_task(name="chatty")
+    first = core.notify(store, task.id, None, "one")
+    second = core.notify(store, task.id, None, "two")
+
+    client.post(f"/inbox/{first}", headers=SAME_SITE, data={"action": "read"})
+    assert not store.get_notification(first).is_unread
+    assert store.unread_count() == 1
+
+    client.post(f"/inbox/{second}", headers=SAME_SITE, data={"action": "delete"})
+    assert store.get_notification(second) is None
+
+
+def test_the_whole_inbox_can_be_marked_read(client, store, make_task):
+    task = make_task(name="loud")
+    core.notify(store, task.id, None, "one")
+    core.notify(store, task.id, None, "two")
+    reply = client.post("/inbox", headers=SAME_SITE)
+    assert store.unread_count() == 0
+    assert "2 marked read" in reply.json()["message"]
+
+
+def test_a_write_to_an_unknown_notification_is_a_404(client):
+    assert client.post("/inbox/999", headers=SAME_SITE,
+                       data={"action": "delete"}).status_code == 404
+
+
+# -- the same run down every door ---------------------------------------
+
+def test_the_environment_a_run_gets_is_built_not_inherited(cfg, monkeypatch):
+    """`child_env` has to be a function of the config, or SC-20 cannot hold.
+
+    The variable below is the shape of the real failure: something a login
+    shell has and cron does not, reaching a run only when you start it by hand.
+    """
+    monkeypatch.setenv("SOMETHING_ONLY_A_TERMINAL_HAS", "1")
+    monkeypatch.setenv("PATH", "/nowhere")
+    env = tick.child_env(cfg)
+    assert "SOMETHING_ONLY_A_TERMINAL_HAS" not in env
+    assert env["PATH"] == cfg.run_path
+    assert env["AI_CRONTAB_ROOT"] == str(cfg.root)
+    assert env["HOME"]
+
+
+def test_a_run_from_the_browser_matches_one_from_a_tick(client, cfg, store,
+                                                        make_task, monkeypatch):
+    """SC-20, with two real runs rather than an argument about the code.
+
+    The task writes down its own environment, and the two copies have to match
+    exactly. This is the session-3 `claude_bin` failure in its second hat: the
+    server is started from a login shell and cron is not, so a run that
+    inherited its parent's environment would resolve a different `claude`
+    depending on which of these two lines started it.
+
+    The environment is therefore changed between the two, into roughly the
+    difference a real machine has between the two doors. A run that carried any
+    of that difference through would fail here.
+    """
+    task = make_task(mode="envdump", name="records-its-environment")
+    env_file = cfg.scratch_dir(task.id) / "env.json"
+
+    monkeypatch.setenv("SOMETHING_ONLY_A_TERMINAL_HAS", "1")
+    run_id = client.post(f"/tasks/{task.id}/run",
+                         headers=SAME_SITE).json()["redirect"].rsplit("/", 1)[1]
+    _wait_for_run(store, run_id)
+    from_the_browser = json.loads(env_file.read_text())
+
+    env_file.unlink()
+    monkeypatch.delenv("SOMETHING_ONLY_A_TERMINAL_HAS")
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    _make_due(store, task.id)
+    started = tick.tick(cfg, store)
+    assert len(started) == 1
+    _wait_for_run(store, started[0])
+    from_a_tick = json.loads(env_file.read_text())
+
+    assert from_the_browser == from_a_tick
+    assert from_the_browser["PATH"] == cfg.run_path
+
+
+def _make_due(store, task_id):
+    """Put a task back in the past, so the next tick finds it due."""
+    task = store.get_task(task_id)
+    task.next_run = config.utcnow() - timedelta(seconds=1)
+    store.update_task(task)
+
+
+def _wait_for_run(store, run_id, timeout=30):
+    """Block until a real supervisor has finished with a run.
+
+    These two runs are launched the way cron launches one, as a detached
+    process, so there is nothing to wait on but the ending the supervisor is
+    required to record.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        run = store.get_run(run_id)
+        if run is not None and run.state != "active":
+            return run
+        time.sleep(0.1)
+    raise AssertionError(f"run {run_id} never finished")
+
+
+def test_a_blank_field_leaves_the_stored_value_alone(client, store, make_task):
+    """A half-filled form must not be a way to end up with an empty prompt."""
+    task = make_task(name="intact")
+    client.post(f"/tasks/{task.id}", headers=SAME_SITE,
+                data={"name": "", "prompt": "", "working_dir": "",
+                      "schedule": "", "time_limit_sec": ""})
+    unchanged = store.get_task(task.id)
+    assert unchanged.name == "intact"
+    assert unchanged.prompt == task.prompt
+    assert unchanged.working_dir == task.working_dir
+    assert unchanged.time_limit_sec == task.time_limit_sec
+
+
+def test_marking_an_already_read_notification_read_is_not_an_error(client, store,
+                                                                   make_task):
+    """Two tabs open on the same inbox is an ordinary way to arrive twice."""
+    task = make_task(name="twice")
+    note_id = core.notify(store, task.id, None, "read me")
+    for _ in range(2):
+        reply = client.post(f"/inbox/{note_id}", headers=SAME_SITE,
+                            data={"action": "read"})
+        assert reply.status_code == 200
+
+
+def test_an_action_the_inbox_does_not_have_is_refused(client, store, make_task):
+    task = make_task(name="picky")
+    note_id = core.notify(store, task.id, None, "leave me alone")
+    reply = client.post(f"/inbox/{note_id}", headers=SAME_SITE,
+                        data={"action": "burn"})
+    assert reply.status_code == 400
+    assert store.get_notification(note_id) is not None

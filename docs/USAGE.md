@@ -284,6 +284,13 @@ and a page per run rendering that run's transcript as turns, with the tool
 calls, their results, and what it cost. Reading a transcript is the thing the
 command line does badly, and it is most of why the interface exists.
 
+It also writes. Everything the CLI can do to a task, the interface can do:
+add one, edit its prompt and schedule, enable and disable it, delete it, and
+run it now. The inbox can be marked read, one notification at a time or all of
+them, and a notification can be deleted. A run started from a browser is the
+run cron would have started, down to the environment it gets, which is what
+`run_path` below is for.
+
 Nothing schedules the server and nothing depends on it. Ticks run whether it is
 up or not, so leaving it down costs only the view.
 
@@ -304,11 +311,14 @@ attach the cookie to that request for you. A header outside the CORS safelist
 would need a preflight this server never approves, so the request is never
 sent.
 
+One consequence you can see: the pages submit their forms with JavaScript
+rather than as plain form posts, because a form cannot add a header and a plain
+post is refused. The interface needs JavaScript enabled to change anything. It
+reads fine without.
+
 Do not put this behind a reverse proxy, and do not change the bind address. It
 has no authentication because it does not need any at loopback, and exposing it
 would remove the one thing that makes that true.
-
-Current version reads; it does not yet write.
 
 ---
 
@@ -319,6 +329,7 @@ Current version reads; it does not yet write.
 | Key | Default | Meaning |
 |-----|---------|---------|
 | `claude_bin` | `"claude"` | The agent binary. Set this absolute |
+| `run_path` | `"/usr/local/bin:/usr/bin:/bin"` | The `PATH` every run gets |
 | `model` | unset | Passed as `--model`. Unset means `claude` chooses |
 | `time_limit_sec` | `600` | How long a run gets, unless the task sets its own |
 | `warn_before_sec` | `60` | How long before the limit the wrap-up warning is sent |
@@ -337,6 +348,14 @@ hold runs to one model deliberately.
 
 A task over the concurrency ceiling stays due rather than being dropped, so the
 next tick starts it.
+
+`run_path` is set rather than inherited, and so is the rest of a run's
+environment: a run keeps `HOME`, `USER`, `LOGNAME`, `SHELL`, `LANG`, `LC_ALL`,
+`TZ` and the proxy variables from whoever started it, and nothing else. That is
+what makes a run the same run whether cron, your terminal or the web interface
+started it. Widen `run_path` if your tasks shell out to programs that live
+somewhere else; the failure it prevents is a task that works when you click
+"Run now" and fails at 08:30.
 
 `tick_interval_sec` is what your cron line does, not what ai-crontab does.
 Nothing here can check it, because you own that line. It exists so the web

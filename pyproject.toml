@@ -40,7 +40,7 @@ ai-crontab = "ai_crontab.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-ai_crontab = ["web/templates/*.html", "web/static/*.css"]
+ai_crontab = ["web/templates/*.html", "web/static/*.css", "web/static/*.js"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

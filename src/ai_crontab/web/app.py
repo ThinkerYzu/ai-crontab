@@ -11,10 +11,12 @@ no login, which is safe only for as long as the guard holds.
 from pathlib import Path
 
 from fastapi import FastAPI
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from ..core import DuplicateName
+from ..schedule import ScheduleError
 from . import routes
 
 _PKG_DIR = Path(__file__).resolve().parent
@@ -41,8 +43,20 @@ def make_app(cfg=None, root=None):
     app.state.templates = Jinja2Templates(directory=str(_PKG_DIR / "templates"))
     app.mount("/static", StaticFiles(directory=str(_PKG_DIR / "static")), name="static")
     app.middleware("http")(guard)
+    app.add_exception_handler(DuplicateName, _bad_request)
+    app.add_exception_handler(ScheduleError, _bad_request)
     app.include_router(routes.router)
     return app
+
+
+async def _bad_request(request, exc):
+    """Turn a refusal from `core` into the message the form should show.
+
+    A duplicate name and an unparseable schedule are things the user typed, not
+    faults, and the CLI already answers both with one line rather than a
+    traceback. The browser gets the same line.
+    """
+    return JSONResponse({"detail": str(exc)}, status_code=400)
 
 
 async def guard(request, call_next):

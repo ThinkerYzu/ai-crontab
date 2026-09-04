@@ -5,9 +5,26 @@ import os
 import subprocess
 import sys
 from datetime import timedelta
+from pathlib import Path
 
 from . import core, model, supervisor
 from .config import utcnow
+
+# What a run keeps of the environment of whoever started it. Everything else is
+# dropped, and `PATH` is replaced from the config, so that the same task is the
+# same run whether cron, a terminal or the web interface started it.
+#
+# The list is short because the environments differ so much: cron has a handful
+# of variables, a login shell has a hundred, and a variable a task only ever
+# sees down one of those paths is a task that works when you click it and fails
+# at 08:30. HOME earns its place because that is where `claude` keeps its
+# credentials and settings; the proxy variables because a proxy is a fact about
+# the machine, not about the door.
+INHERITED_ENV = (
+    "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LC_ALL", "TZ",
+    "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
+    "http_proxy", "https_proxy", "no_proxy",
+)
 
 
 class _TickLock:
@@ -119,6 +136,23 @@ def prune_if_due(cfg, store, now):
     return removed
 
 
+def child_env(cfg):
+    """The environment one run gets, built rather than inherited.
+
+    Every door that can start a run calls this, which is the point: a run
+    started from the browser has to be the run cron would have started
+    ([Decision 11](DESIGN.md)), and the only way that holds is for the
+    environment to be a function of the config instead of a copy of whatever
+    process happened to be the parent. The supervisor passes its own
+    environment on to the agent, so this is what the agent sees too.
+    """
+    env = {k: os.environ[k] for k in INHERITED_ENV if k in os.environ}
+    env.setdefault("HOME", str(Path.home()))
+    env["PATH"] = cfg.run_path
+    env["AI_CRONTAB_ROOT"] = str(cfg.root)
+    return env
+
+
 def spawn_supervisor(cfg, run_id):
     """Start a supervisor for one run and return immediately.
 
@@ -133,7 +167,7 @@ def spawn_supervisor(cfg, run_id):
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         start_new_session=True,
-        env={**os.environ, "AI_CRONTAB_ROOT": str(cfg.root)},
+        env=child_env(cfg),
     )
 
 

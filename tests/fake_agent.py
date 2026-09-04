@@ -84,6 +84,19 @@ def main():
         result("wrote a handoff")
         return 0
 
+    if mode == "envdump":
+        # Write down the environment this run was given, so a test can compare
+        # what two doors produced. Deliberately stdlib only: this mode runs
+        # under the environment `tick.child_env` builds, which is the thing
+        # being measured and which carries no PYTHONPATH.
+        task_id, _, root = mcp_identity(argv)
+        path = os.path.join(root, "tasks", task_id, "scratch", "env.json")
+        with open(path, "w") as f:
+            json.dump(dict(os.environ), f)
+        assistant("wrote the environment down")
+        result("wrote the environment down")
+        return 0
+
     if mode == "echo":
         # Prove the previous run's handoff reached this one: hand it back as
         # the run summary so a test can assert on it.

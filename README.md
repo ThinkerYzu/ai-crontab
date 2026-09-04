@@ -145,7 +145,9 @@ days if nobody has replied" into something the agent arranges for itself.
 
 **There is a web interface, and it stays on loopback.** `ai-crontab web` serves
 the schedule, the inbox, and a page per run that renders that run's transcript
-as turns, which is the one thing the command line does badly. It is optional,
+as turns, which is the one thing the command line does badly. It does
+everything the CLI does to a task as well: add, edit, enable, disable, delete,
+and run now. It is optional,
 nothing depends on it, and it has no login because it listens on `127.0.0.1`
 only and refuses any request that did not come from its own pages. Read
 [the section in docs/USAGE.md](docs/USAGE.md#the-web-interface) before changing
@@ -162,7 +164,7 @@ exposing that port is not the small thing it looks like.
 
 ```bash
 pip install -e ".[dev,web]"
-pytest -q          # 100 tests, about 18 seconds
+pytest -q          # 122 tests, about 19 seconds
 ```
 
 The suite needs no network and starts no agent that costs money. A fake agent

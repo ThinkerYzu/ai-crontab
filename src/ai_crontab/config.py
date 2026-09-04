@@ -40,6 +40,12 @@ class Config:
     picks, so the choice tracks the CLI rather than being frozen here. Set it
     only to hold a run to one model deliberately.
 
+    `run_path` is the `PATH` every run gets, whichever door started it. It is
+    set here rather than inherited so that a run launched from the web
+    interface, which was started from a login shell, resolves the same programs
+    as one launched by cron, which has almost no `PATH` at all
+    ([Decision 11](DESIGN.md)).
+
     `tick_interval_sec` is what the cron line does, not what this tool does:
     nothing here can check it, because you own the cron line. It exists so the
     web interface can say the scheduler is overdue rather than only saying when
@@ -56,6 +62,7 @@ class Config:
     prune_every_sec: int = 86400
     startup_grace_sec: int = 60
     claude_bin: str = "claude"
+    run_path: str = "/usr/local/bin:/usr/bin:/bin"
     model: str | None = None
     timezone: str | None = None
     tick_interval_sec: int = 300

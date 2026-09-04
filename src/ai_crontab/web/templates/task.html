@@ -6,6 +6,20 @@
   {% if not task.enabled %}<span class="tag">disabled</span>{% endif %}
   &middot; added by {{ task.created_by }}</p>
 
+<div class="actions">
+  <form action="/tasks/{{ task.id }}/run" method="post">
+    <button type="submit">Run now</button>
+  </form>
+  <form action="/tasks/{{ task.id }}" method="post">
+    <input type="hidden" name="enabled" value="{{ 'false' if task.enabled else 'true' }}">
+    <button type="submit">{{ 'Disable' if task.enabled else 'Enable' }}</button>
+  </form>
+  <form action="/tasks/{{ task.id }}/delete" method="post"
+        data-confirm="Delete {{ task.name }}, with its handoff, scratch files and transcripts?">
+    <button type="submit" class="danger">Delete</button>
+  </form>
+</div>
+
 <table class="fields">
   <tr><th>Schedule</th><td><code>{{ task.schedule }}</code> ({{ task.schedule_kind }})</td></tr>
   <tr><th>Next run</th><td>{{ view.next_run.strftime('%a %d %b %Y %H:%M %Z') if view.next_run else 'not scheduled' }}</td></tr>
@@ -14,6 +28,20 @@
 </table>
 
 <h2>Prompt</h2>
+<details class="form">
+  <summary>Edit</summary>
+  <form action="/tasks/{{ task.id }}" method="post">
+    <label>Name <input name="name" value="{{ task.name }}" required></label>
+    <label>Schedule <input name="schedule" value="{{ task.schedule }}" required></label>
+    <label>Prompt <textarea name="prompt" rows="12" required>{{ task.prompt }}</textarea></label>
+    <label>Working directory <input name="working_dir" value="{{ task.working_dir }}" required></label>
+    <label>Time limit <input name="time_limit_sec" type="number"
+      value="{{ task.time_limit_sec }}"> <span class="dim">seconds</span></label>
+    <p class="warn">A task runs with every tool pre-granted and nobody to ask,
+      so this prompt is the whole security boundary.</p>
+    <button type="submit">Save</button>
+  </form>
+</details>
 <pre class="prompt">{{ task.prompt }}</pre>
 
 <h2>Handoff</h2>

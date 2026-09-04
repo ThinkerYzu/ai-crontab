@@ -20,7 +20,7 @@
 {% endif %}
 
 {% if not tasks %}
-  <p class="empty">No tasks. Add one with <code>ai-crontab add</code>.</p>
+  <p class="empty">No tasks. Add one below, or with <code>ai-crontab add</code>.</p>
 {% else %}
 <table>
   <tr><th>Task</th><th>Schedule</th><th>Next run</th><th>Last run</th></tr>
@@ -40,4 +40,27 @@
   {% endfor %}
 </table>
 {% endif %}
+
+<details class="form">
+  <summary>Add a task</summary>
+  <form action="/tasks/new" method="post">
+    <label>Name <input name="name" required placeholder="gtk-triage-watch"></label>
+    <label>Schedule
+      <input name="schedule" required placeholder="30 8 * * 1-5">
+      <span class="dim">a cron expression, or an ISO timestamp to run once</span>
+    </label>
+    <label>Prompt <textarea name="prompt" rows="8" required
+      placeholder="What the agent should do, and when to file a notification."></textarea></label>
+    <label>Working directory
+      <input name="working_dir">
+      <span class="dim">where the run starts; defaults to the directory this
+        server was started in</span>
+    </label>
+    <label>Time limit <input name="time_limit_sec" type="number"
+      placeholder="{{ cfg.time_limit_sec }}"> <span class="dim">seconds</span></label>
+    <p class="warn">A task runs with every tool pre-granted and nobody to ask,
+      so this prompt is the whole security boundary.</p>
+    <button type="submit">Add task</button>
+  </form>
+</details>
 {% endblock %}

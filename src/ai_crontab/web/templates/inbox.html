@@ -7,6 +7,12 @@
   {% else %}Unread only. <a href="/inbox?all">Show everything</a>{% endif %}
 </p>
 
+{% if unread %}
+<div class="actions">
+  <form action="/inbox" method="post"><button type="submit">Mark all read</button></form>
+</div>
+{% endif %}
+
 {% if not notes %}
   <p class="empty">
     {% if show_all %}No notifications.
@@ -25,6 +31,19 @@
     {% if not v.note.is_unread %}&middot; read{% endif %}
   </p>
   {% if v.note.body %}<pre>{{ v.note.body }}</pre>{% endif %}
+  <div class="actions">
+    {% if v.note.is_unread %}
+    <form action="/inbox/{{ v.note.id }}" method="post">
+      <input type="hidden" name="action" value="read">
+      <button type="submit">Mark read</button>
+    </form>
+    {% endif %}
+    <form action="/inbox/{{ v.note.id }}" method="post"
+          data-confirm="Delete this notification?">
+      <input type="hidden" name="action" value="delete">
+      <button type="submit" class="danger">Delete</button>
+    </form>
+  </div>
 </article>
 {% endfor %}
 {% endif %}

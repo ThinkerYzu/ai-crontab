@@ -1,8 +1,12 @@
-"""The read-only pages, and the one JSON route the dashboard polls.
+"""The pages, the one JSON route the dashboard polls, and the routes that write.
 
-Every handler opens the store for its own request, reads, and closes. None of
-them decides anything: what a task is, when it next runs and what a run cost
-are all answered by `core` and `store`, the way the CLI answers them.
+Every handler opens the store for its own request and closes it again. None of
+them decides anything: what a task is, when it next runs, what a run cost and
+what adding one means are all answered by `core`, `tick` and `store`, the way
+the CLI answers them.
+
+The writing half is guarded before it is routed, in `app.guard`. Read that
+before adding a route here.
 """
 
 from fastapi import APIRouter, HTTPException, Request
@@ -10,6 +14,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 
 from .. import config as config_module
 from .. import core
+from .. import tick as tick_module
 from ..core import TaskNotFound
 from ..model import from_iso
 from . import transcript as transcript_module
@@ -199,3 +204,153 @@ def _iso_local(cfg, when):
     """The same instant as text, for the JSON route, which cannot take a datetime."""
     local = _local(cfg, when)
     return local.isoformat() if local else None
+
+
+# -- the routes that write ----------------------------------------------
+#
+# Every one of these is a call into `core` or `tick` with the form decoded in
+# front of it, so what the browser can do to a task is exactly what the CLI can
+# do to it. None of them decides anything the other doors do not.
+#
+# They answer with JSON rather than a redirect because the guard requires a
+# header an HTML form cannot set, so the page posts with `fetch` and follows
+# the `redirect` itself. See `static/app.js`.
+
+
+@router.post("/tasks/new")
+async def create_task(request: Request):
+    cfg = load_config(request)
+    form = await request.form()
+    with core.open_store(cfg) as store:
+        task = core.add_task(
+            store, cfg,
+            name=_required(form, "name"),
+            prompt=_required(form, "prompt"),
+            schedule_text=_required(form, "schedule"),
+            working_dir=_field(form, "working_dir"),
+            time_limit_sec=_int_field(form, "time_limit_sec"),
+        )
+    return _answer(f"/tasks/{task.id}", f"added {task.name}")
+
+
+@router.post("/tasks/{ref}")
+async def edit_task(request: Request, ref: str):
+    """Change whatever fields the form carried, and nothing else.
+
+    A form that submits only `enabled` is the enable and disable buttons; one
+    that submits the whole task is the edit form. `core.modify_task` touches
+    only the keys it is given, so both are the same route.
+
+    A field left blank is left alone rather than written as blank. There is no
+    task worth having with no prompt, and a form that cleared one by being
+    submitted half-filled would be a bad way to find that out.
+    """
+    cfg = load_config(request)
+    form = await request.form()
+    changes = {name: _field(form, name)
+               for name in ("name", "prompt", "schedule", "working_dir")
+               if _field(form, name) is not None}
+    if _field(form, "time_limit_sec") is not None:
+        changes["time_limit_sec"] = _int_field(form, "time_limit_sec")
+    if "enabled" in form:
+        changes["enabled"] = _field(form, "enabled") == "true"
+
+    with core.open_store(cfg) as store:
+        task = core.modify_task(store, cfg, _resolve(store, ref).id, **changes)
+    return _answer(f"/tasks/{task.id}", "saved")
+
+
+@router.post("/tasks/{ref}/delete")
+async def delete_task(request: Request, ref: str):
+    cfg = load_config(request)
+    with core.open_store(cfg) as store:
+        task = core.remove_task(store, cfg, _resolve(store, ref).id)
+    return _answer("/", f"removed {task.name}")
+
+
+@router.post("/tasks/{ref}/run")
+async def run_task_now(request: Request, ref: str):
+    """Start a run this instant, by the same path the tick uses.
+
+    `tick.run_now` builds the child's environment from the config rather than
+    passing on this server's own, which is what makes this the run cron would
+    have started ([Decision 11](DESIGN.md)). A `None` means the task already
+    has a run in flight, which is the overlap rule doing its job rather than an
+    error worth a stack trace.
+    """
+    cfg = load_config(request)
+    with core.open_store(cfg) as store:
+        task = _resolve(store, ref)
+        run_id = tick_module.run_now(cfg, store, task.id)
+    if run_id is None:
+        raise HTTPException(status_code=409, detail="already running")
+    return _answer(f"/runs/{run_id}", f"started {run_id}")
+
+
+@router.post("/inbox")
+async def mark_whole_inbox_read(request: Request):
+    cfg = load_config(request)
+    with core.open_store(cfg) as store:
+        marked = store.mark_all_read(config_module.utcnow())
+    return _answer("/inbox", f"{marked} marked read")
+
+
+@router.post("/inbox/{note_id}")
+async def change_notification(request: Request, note_id: int):
+    """Mark one notification read, or delete it.
+
+    Nothing here writes a notification: only a run does that, through the MCP
+    tools. The inbox is yours to clear, not to fill.
+
+    Marking an already-read notification read is a success, not a 404. Two
+    tabs open on the same inbox is an ordinary way to arrive here twice, and
+    the second arrival has nothing to complain about.
+    """
+    cfg = load_config(request)
+    form = await request.form()
+    action = _field(form, "action") or "read"
+    if action not in ("read", "delete"):
+        raise HTTPException(status_code=400, detail=f"no such action {action!r}")
+    with core.open_store(cfg) as store:
+        if store.get_notification(note_id) is None:
+            raise HTTPException(status_code=404,
+                                detail=f"no notification {note_id}")
+        if action == "delete":
+            store.delete_notification(note_id)
+        else:
+            store.mark_read(note_id, config_module.utcnow())
+    return _answer("/inbox", "deleted" if action == "delete" else "marked read")
+
+
+def _answer(where, message):
+    """The reply to a write: where the page should go next, and what to say."""
+    return JSONResponse({"redirect": where, "message": message})
+
+
+def _field(form, name):
+    """One form field, with blank treated as absent.
+
+    A text input the user left alone arrives as an empty string, and passing
+    that on would blank the stored value rather than leave it alone.
+    """
+    value = form.get(name)
+    value = value.strip() if isinstance(value, str) else value
+    return value or None
+
+
+def _required(form, name):
+    value = _field(form, name)
+    if value is None:
+        raise HTTPException(status_code=400, detail=f"{name} is required")
+    return value
+
+
+def _int_field(form, name):
+    value = _field(form, name)
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        raise HTTPException(status_code=400,
+                            detail=f"{name} must be a number") from None

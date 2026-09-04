@@ -9,10 +9,12 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 from mcp.server.mcpserver.exceptions import ToolError
 
 from ai_crontab import core, mcp_server
 from ai_crontab.config import utcnow
+from ai_crontab.web.app import make_app
 
 
 def call(server, tool, /, **arguments):
@@ -294,12 +296,16 @@ def test_a_launched_server_answers_a_real_client(cfg, store, make_task):
     assert store.get_notification(filed).task_id == task.id
 
 
-def test_the_three_doors_produce_the_same_task(cfg, store, run):
-    """SC-15: the CLI, the library and MCP are front ends, not three behaviours.
+def test_the_four_doors_produce_the_same_task(cfg, store, run):
+    """SC-15 and SC-17: four front ends, not four behaviours.
 
     Everything but the identifying fields has to match. A daily cron is used
-    because all three compute `next_run` forward from their own moment, and for
+    because all four compute `next_run` forward from their own moment, and for
     a daily schedule those moments land on the same instant.
+
+    The web interface joined this test rather than getting one of its own,
+    which is the point of it: a door that is only compared against itself can
+    drift from the other three without anything noticing.
     """
     _, _, server = run
     shared = dict(prompt="read the queue", schedule="0 9 * * *",
@@ -315,11 +321,17 @@ def test_the_three_doors_produce_the_same_task(cfg, store, run):
     core.add_task(store, cfg, "by-library", shared["prompt"], shared["schedule"],
                   working_dir=shared["working_dir"])
     call(server, "ai_crontab_add_task", name="by-mcp", **shared)
+    TestClient(make_app(root=cfg.root), base_url="http://127.0.0.1:8474").post(
+        "/tasks/new",
+        data={"name": "by-web", "prompt": shared["prompt"],
+              "schedule": shared["schedule"], "working_dir": shared["working_dir"]},
+        headers={"host": "127.0.0.1:8474", "x-ai-crontab": "1"},
+    )
 
     def comparable(task):
         return (task.prompt, task.schedule_kind, task.schedule, task.working_dir,
                 task.time_limit_sec, task.enabled, task.next_run)
 
     stored = [comparable(store.find_task(n))
-              for n in ("by-cli", "by-library", "by-mcp")]
-    assert stored[0] == stored[1] == stored[2]
+              for n in ("by-cli", "by-library", "by-mcp", "by-web")]
+    assert stored[0] == stored[1] == stored[2] == stored[3]

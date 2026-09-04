@@ -65,3 +65,30 @@ ol.turns { list-style: none; padding: 0; margin: 0; }
 .row summary { cursor: pointer; }
 .row.failed .kind { color: var(--bad); border-color: var(--bad); }
 .row.tool_use .kind { color: var(--accent); border-color: var(--accent); }
+
+/* Forms and the buttons beside them. Writing is a small part of the interface,
+   so it stays folded away in a <details> until asked for. */
+.actions { display: flex; gap: .5rem; flex-wrap: wrap; margin: .5rem 0; }
+.actions form { display: inline; }
+details.form { margin: .5rem 0; }
+details.form summary { cursor: pointer; color: var(--accent); font-size: 13px; }
+details.form form { margin-top: .75rem; }
+label { display: block; margin: .6rem 0; }
+label input, label textarea {
+  display: block; width: 100%; margin-top: .2rem; padding: .4rem .5rem;
+  background: var(--bg); color: var(--fg);
+  border: 1px solid var(--line); border-radius: 6px;
+}
+label textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+label input[type="number"] { width: 8rem; }
+button {
+  font: inherit; font-size: 13px; padding: .3rem .8rem; cursor: pointer;
+  background: var(--panel); color: var(--fg);
+  border: 1px solid var(--line); border-radius: 6px;
+}
+button:hover { border-color: var(--accent); color: var(--accent); }
+button.danger:hover { border-color: var(--bad); color: var(--bad); }
+#flash {
+  border-left: 3px solid var(--ok); padding-left: .75rem; color: var(--dim);
+}
+#flash.error { border-color: var(--bad); color: var(--bad); }
