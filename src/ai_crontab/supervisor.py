@@ -67,7 +67,11 @@ def write_mcp_config(cfg, task, run_id):
 
 
 def agent_command(cfg, task, mcp_config):
-    """The argv that starts one agent run."""
+    """The argv that starts one agent run.
+
+    `--model` is passed only when the config names one, so by default the run
+    takes whatever model `claude` chooses.
+    """
     argv = [
         cfg.claude_bin, "-p",
         "--input-format", "stream-json",

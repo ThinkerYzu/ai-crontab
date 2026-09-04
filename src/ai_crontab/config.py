@@ -35,6 +35,10 @@ class Config:
     Every duration is in seconds. `warn_before_sec` and `grace_sec` are
     subtracted from and added to a run's own time limit, so a task with a
     longer limit still gets the same wrap-up window unless it sets its own.
+
+    `model` is None on purpose: a run then gets whatever `claude` itself
+    picks, so the choice tracks the CLI rather than being frozen here. Set it
+    only to hold a run to one model deliberately.
     """
 
     root: Path = field(default_factory=default_root)
