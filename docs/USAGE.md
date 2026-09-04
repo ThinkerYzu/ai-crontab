@@ -111,6 +111,12 @@ ai-crontab add --name once    --schedule "2026-09-10T14:00:00Z" --prompt "..."
 A one-time task retires after it runs. It stays in `list` with no next run, so
 you can read its history, until you remove it.
 
+The timestamp form is not just a convenience. Cron has no year field, so a
+specific date in a specific year cannot be written as a cron expression at all,
+and a sixth field naming one is rejected rather than ignored. See
+[Schedules](../README.md#schedules) in the README for the full picture,
+including what to do about a recurrence limited to particular years.
+
 ### `run-now` returns before the run does
 
 `run-now` prints a run id and exits in milliseconds. The run continues in the

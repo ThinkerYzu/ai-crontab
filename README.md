@@ -69,6 +69,46 @@ And install the cron line that drives it:
 Any interval works. See [docs/USAGE.md](docs/USAGE.md) for what each half of
 that line is for and how to check the installation.
 
+## Schedules
+
+`--schedule` takes one of two forms, and which one you used decides whether the
+task ever runs again.
+
+| Form | Example | Meaning |
+|------|---------|---------|
+| Cron expression | `30 8 * * *` | Every day at 08:30 |
+| Cron expression | `0 9 15 3 *` | 09:00 on 15 March, every year |
+| ISO timestamp | `2027-03-15T09:00` | 09:00 on 15 March 2027, once |
+
+**Cron has no year field.** Its five fields are minute, hour, day of month,
+month, and day of week, so there is no way to write "15 March 2027" as a cron
+expression. `0 9 15 3 *` is the closest, and it means every March for as long
+as the task exists. Adding a sixth field for the year does not help either; it
+is rejected as invalid rather than quietly ignored.
+
+A specific date in a specific year is an ISO timestamp instead, which makes a
+one-time task:
+
+```bash
+ai-crontab add --name renewal-check --schedule "2027-03-15T09:00" \
+  --prompt "Check whether the certificate was renewed. If it was not, file a
+            high priority notification."
+```
+
+A one-time task retires after it runs. It stays in `list` with no next run so
+you can still read its history, until you remove it.
+
+Both forms are read in your local timezone unless the timestamp carries an
+offset or a trailing `Z`. A timestamp already in the past creates a retired
+task rather than running immediately, because "at 09:00" written yesterday is
+usually a mistake rather than an instruction to run now.
+
+What neither form expresses is a repeating schedule limited to particular
+years, such as every 15 March in 2027 and 2029 but not 2028. Either add a
+one-time task for each date, or let the task arrange its own follow-up: an
+agent can call the MCP tools to schedule its next run, which is the same
+mechanism behind "check back in three days if nobody has replied".
+
 ## How it works
 
 **The tick is the unit of work.** There is no resident process. Cron runs
