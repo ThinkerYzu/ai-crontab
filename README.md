@@ -3,29 +3,124 @@
 Run AI agent tasks on a schedule, unattended, and let them reach you through an
 inbox you read when you have time.
 
-Each entry is a prompt an agent carries out, one-time or recurring, with nobody
-watching. System cron fires `ai-crontab tick`; the tick launches whatever became
-due since the last one and exits, so there is no resident process to survive a
-sleeping laptop. An agent that finds something worth saying files a notification;
-a run that turns up nothing files nothing.
+System cron can run a script on a schedule, but a script cannot read a bug
+report and decide whether the reply matters. An agent can, but only when you
+start a session and ask it to. ai-crontab schedules the agent instead of the
+script: each entry is a prompt that `claude` carries out, one-time or recurring,
+with nobody watching.
 
-## Status
+```
+$ ai-crontab add --name gtk-triage --schedule "30 8 * * *" \
+    --prompt "Check the untriaged GTK bug queue. If it grew since the
+              watermark in your handoff, file one notification listing the
+              new bugs. Otherwise file nothing."
 
-Skeleton only. No implementation yet.
+$ ai-crontab notify list
+    1  09-03 23:00  normal gtk-triage: 1 new untriaged bug in Core :: Widget: Gtk
+```
+
+Nothing is ever pushed at you. A run that finds something worth saying files a
+notification; a run that turns up nothing files nothing, so the inbox stays a
+list of things that need you rather than a log of everything that ran.
+
+## Read this before you schedule anything
+
+**A scheduled run has every tool granted in advance.** It starts `claude` with
+`--permission-mode bypassPermissions` and `--permission-prompts none`, because
+there is no terminal attached and nobody to approve anything. A run can
+therefore edit files, run shell commands, and reach the network, on a timer,
+while you are asleep.
+
+That is the whole point of the tool and it is also its only real risk. The
+security boundary is the prompt you wrote and the working directory you pointed
+it at. There is no protection from a prompt you wrote carelessly, so give a
+task the narrowest job that does what you want, and prefer a scratch directory
+over your home directory or a repository you care about.
+
+## Requirements
+
+- Python 3.11 or newer
+- [Claude Code](https://claude.com/claude-code) (the `claude` command) on the machine
+- A working `cron`
+
+## Install
+
+```bash
+git clone https://github.com/ThinkerYzu/ai-crontab
+cd ai-crontab
+python3 -m venv .venv && . .venv/bin/activate
+pip install -e .
+```
+
+Then point it at your `claude` binary, because cron's `PATH` will not find one
+installed under your home directory:
+
+```bash
+mkdir -p ~/.ai-crontab
+echo 'claude_bin = "'$(command -v claude)'"' > ~/.ai-crontab/config.toml
+```
+
+And install the cron line that drives it:
+
+```cron
+*/5 * * * * /path/to/ai-crontab/.venv/bin/ai-crontab tick >> ~/.ai-crontab/tick.log 2>&1 && date -Is > ~/.ai-crontab/last-tick
+```
+
+Any interval works. See [docs/USAGE.md](docs/USAGE.md) for what each half of
+that line is for and how to check the installation.
+
+## How it works
+
+**The tick is the unit of work.** There is no resident process. Cron runs
+`ai-crontab tick`; it reads the task store, launches whatever is due, and
+exits in milliseconds. That keeps the tool honest about a laptop that sleeps,
+reboots, and travels, because a tick only has to be correct the next time it
+runs. Any sequence of ticks at any spacing leaves the store consistent, and a
+task that missed five due times over a weekend runs once rather than five
+times.
+
+**Silence is a valid answer.** Plenty of tasks exist to watch for a condition
+that is usually false, so a task that reports nothing for three weeks is
+working correctly. The scheduler therefore never reads silence as a fault: a
+failing task is not disabled, not backed off, and never notified about. Its
+failures go to the run history, where you look when you are debugging a task
+rather than every morning.
+
+**A run gets ten minutes, and the limit is a checkpoint.** A minute before the
+deadline the agent is sent a real message telling it to stop and write down
+where it got to. Each task keeps that **handoff** document, and the scheduler
+puts it into the next run's prompt rather than leaving the agent to find it. So
+"work through the triage queue" becomes a task that gets as far as it can,
+notes where it stopped, and carries on tomorrow.
+
+**Every run has a supervisor.** The tick exits immediately and the next one may
+be an hour away, so something else has to be alive to enforce the limit. Each
+run gets a small process that owns one agent, pushes the wrap-up warning at
+nine minutes, kills the whole process group at ten, and records how it ended.
+It is what guarantees a broken run can never be mistaken for a quiet one.
+
+**Agents can change the schedule.** MCP tools let a task's agent add, remove,
+and modify tasks, including its own. That is what turns "check back in three
+days if nobody has replied" into something the agent arranges for itself.
 
 ## Documentation
 
-The design documents live in the workspace, in their own repository:
-
-    ~/progm/claudebugzilla/proj_docs/ai-crontab/
-
-- `SPEC.md` - what this is and why, with the requirements and success criteria
-- `DESIGN.md` - architecture, the run lifecycle, the tick algorithm, data model
-- `IMPLEMENTATION-GUIDE.md` - dependencies, file structure, build phases
-- `HANDOFF.md` - current status and what to do next
+- **[docs/USAGE.md](docs/USAGE.md)** covers every command, the config file, how
+  to write a task prompt that works unattended, the tools an agent can call
+  back through, and how to tell a healthy installation from a broken one.
 
 ## Development
 
-    python3 -m venv .venv && . .venv/bin/activate
-    pip install -e ".[dev]"
-    pytest -q
+```bash
+pip install -e ".[dev]"
+pytest -q          # 74 tests, about 18 seconds
+```
+
+The suite needs no network and starts no agent that costs money. A fake agent
+in `tests/fake_agent.py` speaks the same `stream-json` protocol a real run
+does, so every timing rule (the warning, the kill, the process-group cleanup)
+is tested in seconds rather than minutes.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
