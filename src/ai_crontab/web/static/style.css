@@ -92,3 +92,10 @@ button.danger:hover { border-color: var(--bad); color: var(--bad); }
   border-left: 3px solid var(--ok); padding-left: .75rem; color: var(--dim);
 }
 #flash.error { border-color: var(--bad); color: var(--bad); }
+
+/* The live view. The clock beside a run in flight is the only number on these
+   pages the browser writes, and #stale is what appears instead of a refresh
+   when the reader has something open a refresh would discard. */
+.elapsed { font-variant-numeric: tabular-nums; }
+.running .elapsed, #still-running .elapsed { color: var(--warn); }
+#stale { border-left: 3px solid var(--warn); padding-left: .75rem; }

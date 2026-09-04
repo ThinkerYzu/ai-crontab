@@ -108,8 +108,36 @@ ai-crontab add --name weekly  --schedule "0 9 * * 1"       --prompt "..."
 ai-crontab add --name once    --schedule "2026-09-10T14:00:00Z" --prompt "..."
 ```
 
-A one-time task retires after it runs. It stays in `list` with no next run, so
-you can read its history, until you remove it.
+Which of the two you meant is inferred rather than declared: anything that
+parses as cron is cron, and everything else is tried as a timestamp. That
+leaves more forms accepted than the two examples suggest.
+
+| Form | Example | Means |
+|------|---------|-------|
+| Five fields | `30 8 * * 1-5` | 08:30 on weekdays |
+| Named weekdays | `0 9 * * MON-FRI` | the same thing |
+| Shorthand | `@daily`, `@hourly`, `@weekly`, `@monthly`, `@yearly`, `@midnight` | what they say, in your timezone |
+| Six fields | `*/30 * * * * *` | the sixth field is **seconds**, not a year |
+| Timestamp | `2026-09-10T14:00`, `2026-09-10 14:00`, `2026-09-10` | once; a bare date is midnight |
+| Timestamp with offset | `2026-09-10T14:00:00-07:00` | once, at that instant |
+
+`@reboot` is refused: nothing here is resident, so there is no boot to hook.
+
+Two things the seconds field cannot do. A task runs no more often than your
+cron line fires `ai-crontab tick`, so `*/30 * * * * *` on a five-minute tick is
+a task that runs every five minutes. And the sixth field is why a year cannot
+be smuggled in as `0 9 15 3 * 2027` — that is rejected because 2027 is not a
+valid number of seconds, not because six fields are.
+
+A schedule with no offset is read in your local timezone. A one-time task
+retires after it runs. It stays in `list` with no next run, so you can read its
+history, until you remove it.
+
+**A timestamp already in the past is accepted, not refused.** The task is
+created retired, on the reasoning that "at 09:00" written yesterday is a
+mistake rather than an instruction to run now. `add` says so, and `list` shows
+the task as `retired`, but a mistyped year gives you a task that will never
+fire until you change its schedule.
 
 The timestamp form is not just a convenience. Cron has no year field, so a
 specific date in a specific year cannot be written as a cron expression at all,

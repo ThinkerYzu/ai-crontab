@@ -6,18 +6,27 @@
   {% if health.state == 'unknown' %}
     No tick recorded yet. Is the cron line installed?
   {% elif health.state == 'late' %}
-    Scheduler last ticked {{ health.ago_sec // 60 }} min ago, longer than the
-    {{ cfg.tick_interval_sec // 60 }} min interval in config. Nothing is due to run.
+    Scheduler last ticked
+    <span class="elapsed" data-since="{{ health.last_tick.isoformat() }}"></span>
+    ago, longer than the {{ cfg.tick_interval_sec // 60 }} min interval in
+    config. Nothing is due to run.
   {% else %}
-    Scheduler ticked {{ health.ago_sec }}s ago.
+    Scheduler ticked
+    <span class="elapsed" data-since="{{ health.last_tick.isoformat() }}"></span>
+    ago.
   {% endif %}
 </p>
 
 {% if active %}
 <p class="running">{{ active | length }} run{{ '' if active | length == 1 else 's' }} in flight:
-  {% for run in active %}<a href="/runs/{{ run.id }}">{{ run.id }}</a>{% if not loop.last %}, {% endif %}{% endfor %}
+  {% for run in active %}<a href="/runs/{{ run.id }}">{{ run.id }}</a>
+    <span class="elapsed" data-since="{{ run.started_at.isoformat() }}"></span>{% if not loop.last %}, {% endif %}{% endfor %}
 </p>
 {% endif %}
+
+{# What the poll compares against. An empty signature would be a page that
+   never refreshes, so it is rendered here beside what it describes. #}
+<div id="live" data-poll="/api/state" data-signature="{{ signature }}" hidden></div>
 
 {% if not tasks %}
   <p class="empty">No tasks. Add one below, or with <code>ai-crontab add</code>.</p>
@@ -47,7 +56,10 @@
     <label>Name <input name="name" required placeholder="gtk-triage-watch"></label>
     <label>Schedule
       <input name="schedule" required placeholder="30 8 * * 1-5">
-      <span class="dim">a cron expression, or an ISO timestamp to run once</span>
+      <span class="dim">a cron expression (<code>30 8 * * 1-5</code>,
+        <code>@daily</code>), or an ISO timestamp to run once
+        (<code>2027-03-15T09:00</code>). A time already past makes a retired
+        task rather than an error.</span>
     </label>
     <label>Prompt <textarea name="prompt" rows="8" required
       placeholder="What the agent should do, and when to file a notification."></textarea></label>

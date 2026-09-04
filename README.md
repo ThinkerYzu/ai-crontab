@@ -79,12 +79,14 @@ task ever runs again.
 | Cron expression | `30 8 * * *` | Every day at 08:30 |
 | Cron expression | `0 9 15 3 *` | 09:00 on 15 March, every year |
 | ISO timestamp | `2027-03-15T09:00` | 09:00 on 15 March 2027, once |
+| Shorthand | `@daily`, `@hourly`, `@weekly`, `@monthly` | what they say, in your timezone |
 
 **Cron has no year field.** Its five fields are minute, hour, day of month,
 month, and day of week, so there is no way to write "15 March 2027" as a cron
 expression. `0 9 15 3 *` is the closest, and it means every March for as long
-as the task exists. Adding a sixth field for the year does not help either; it
-is rejected as invalid rather than quietly ignored.
+as the task exists. A sixth field does not help: it is read as seconds, so
+`0 9 15 3 * 2027` is rejected because 2027 is not a valid number of seconds
+rather than quietly taken for a year.
 
 A specific date in a specific year is an ISO timestamp instead, which makes a
 one-time task:

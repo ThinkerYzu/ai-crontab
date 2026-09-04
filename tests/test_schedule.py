@@ -87,3 +87,56 @@ def _daily_task():
                 schedule="30 8 * * *", working_dir="/tmp", time_limit_sec=600,
                 enabled=True, next_run=now, created_by="user",
                 created_at=now, updated_at=now)
+
+
+# -- what counts as a schedule ------------------------------------------
+
+@pytest.mark.parametrize("text, kind", [
+    ("30 8 * * 1-5", CRON),        # the five fields most people write
+    ("0 9 * * MON-FRI", CRON),     # named weekdays
+    ("*/30 * * * * *", CRON),      # a sixth field, which croniter reads as seconds
+    ("@daily", CRON),              # the shorthands croniter brings with it
+    ("@hourly", CRON),
+    ("@weekly", CRON),
+    ("@monthly", CRON),
+    ("@yearly", CRON),
+    ("@midnight", CRON),
+    ("2026-09-07T15:00", ONCE),
+    ("2026-09-07 15:00", ONCE),
+    ("2026-09-07T15:00:00-07:00", ONCE),
+    ("2026-09-07", ONCE),          # a bare date means midnight
+    ("  30 8 * * *  ", CRON),      # surrounding space is not an error
+])
+def test_the_forms_a_schedule_may_take(text, kind):
+    """The accepted set, written down because it is wider than the docs once said.
+
+    `classify` asks croniter first and takes anything it accepts, so the
+    shorthands and the seconds field come along whether or not they were
+    designed for. They work, so they are documented rather than blocked.
+    """
+    assert schedule.classify(text)[0] == kind
+
+
+@pytest.mark.parametrize("text", [
+    "0 9 * *",           # four fields
+    "0 9 15 3 * 2027",   # a sixth field is seconds, not a year, and 2027 is not a second
+    "99 8 * * *",        # out of range
+    "0 25 * * *",
+    "0 9 * * 8",
+    "@reboot",           # nothing here is resident, so there is no boot to hook
+    "15:00",             # a time with no date
+    "tomorrow at 3pm",
+    "",
+    "   ",
+])
+def test_what_is_not_a_schedule(text):
+    with pytest.raises(schedule.ScheduleError):
+        schedule.classify(text)
+
+
+def test_a_sub_minute_schedule_cannot_beat_the_tick(cfg, at):
+    """croniter takes a seconds field; the tick is what decides how often a task
+    can actually run, and it fires on whatever interval the user's cron line has."""
+    kind, text = schedule.classify("*/30 * * * * *")
+    first = schedule.first_run_time(kind, text, at(), cfg.tz)
+    assert (first - at()).total_seconds() <= 30

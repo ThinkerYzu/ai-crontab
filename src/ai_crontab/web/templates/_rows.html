@@ -1,0 +1,11 @@
+{# One turn per list item. Included by run.html for the rows a run already has,
+   and rendered on its own by /runs/{id}/rows for the ones it grows while the
+   agent is still working, so both come out of this one description. #}
+{% for row in rows %}
+<li class="row {{ row.kind }}{{ ' failed' if row.is_error else '' }}">
+  <details{% if row.kind == 'text' %} open{% endif %}>
+    <summary><span class="kind">{{ row.kind.replace('_', ' ') }}</span> {{ row.title }}</summary>
+    <pre>{{ row.body }}</pre>
+  </details>
+</li>
+{% endfor %}

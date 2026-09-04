@@ -4,7 +4,10 @@
 <h1>{% if task %}<a href="/tasks/{{ task.id }}">{{ task.name }}</a>{% else %}{{ run.task_id }}{% endif %}</h1>
 <p class="dim">{{ run.id }} &middot; started {{ view.started.strftime('%a %d %b %Y %H:%M %Z') }}
   &middot; <span class="state {{ run.state }}">{{ run.state }}</span>
-  {% if view.took_sec is not none %}&middot; {{ view.took_sec }}s{% endif %}</p>
+  {% if view.took_sec is not none %}&middot; {{ view.took_sec }}s{% endif %}
+  {% if live %}<span id="still-running">&middot; running for
+    <span class="elapsed" data-since="{{ run.started_at.isoformat() }}"></span>
+    of {{ task.time_limit_sec if task else '' }}s</span>{% endif %}</p>
 
 {% if run.error %}<p class="error">{{ run.error }}</p>{% endif %}
 
@@ -33,18 +36,15 @@
 {% endif %}
 
 <h2>Turns</h2>
-{% if not transcript.rows %}
-  <p class="empty">Nothing in the transcript. The agent was killed before it spoke.</p>
-{% else %}
-<ol class="turns">
-  {% for row in transcript.rows %}
-  <li class="row {{ row.kind }}{{ ' failed' if row.is_error else '' }}">
-    <details{% if row.kind == 'text' %} open{% endif %}>
-      <summary><span class="kind">{{ row.kind.replace('_', ' ') }}</span> {{ row.title }}</summary>
-      <pre>{{ row.body }}</pre>
-    </details>
-  </li>
-  {% endfor %}
+{# The list is always here, empty or not, because the tail appends into it. #}
+<ol class="turns" data-run="{{ run.id }}" data-rows="{{ transcript.rows | length }}"
+    {% if live %}data-live="1"{% endif %}>
+{% with rows = transcript.rows %}{% include "_rows.html" %}{% endwith %}
 </ol>
+{% if not transcript.rows %}
+  <p class="empty" id="no-turns">
+    {% if live %}Nothing yet. The agent has not finished its first turn.
+    {% else %}Nothing in the transcript. The agent was killed before it spoke.{% endif %}
+  </p>
 {% endif %}
 {% endblock %}

@@ -14,10 +14,16 @@ class ScheduleError(ValueError):
 def classify(text):
     """Decide whether a schedule string is a cron expression or a timestamp.
 
-    Returns the pair (kind, normalised text). A five or six field expression is
-    cron; anything else is parsed as an ISO timestamp for a one-time task, so
-    both `"30 8 * * 1-5"` and `"2026-09-04T09:00"` are accepted wherever a
-    schedule is asked for.
+    Returns the pair (kind, normalised text). Anything croniter accepts is
+    cron, which is more than the five fields most people write: a sixth field
+    for seconds, named weekdays like `MON-FRI`, and the `@daily` family of
+    shorthands. Anything else is parsed as an ISO timestamp for a one-time
+    task, so `"30 8 * * 1-5"`, `"@daily"` and `"2026-09-04T09:00"` are all
+    accepted wherever a schedule is asked for.
+
+    Only the format is checked here. A one-time time that has already passed
+    parses fine and is refused later, by `first_run_time` returning None, which
+    creates the task retired rather than firing it immediately.
     """
     text = text.strip()
     if croniter.is_valid(text):

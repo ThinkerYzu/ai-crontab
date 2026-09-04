@@ -565,3 +565,197 @@ def test_an_action_the_inbox_does_not_have_is_refused(client, store, make_task):
                         data={"action": "burn"})
     assert reply.status_code == 400
     assert store.get_notification(note_id) is not None
+
+
+# -- watching a run happen ----------------------------------------------
+#
+# SC-21. Two mechanisms, and the risk in each is the same one: the page and the
+# poll must agree about what the page is showing. The schedule agrees through a
+# signature built from the very rows it rendered; a run's page agrees through a
+# row count, which is only a safe cursor for as long as rows are append-only.
+
+def test_the_page_and_the_poll_sign_the_same_state(client, make_task):
+    """The signature on the page is the one the poll compares against.
+
+    Two ways of gathering the same numbers would let the page render one state
+    and the poll describe another, and the symptom would be a page that
+    refreshes forever.
+    """
+    make_task(name="signed")
+    page = client.get("/", headers=SAME_SITE).text
+    signature = client.get("/api/state", headers=SAME_SITE).json()["signature"]
+    assert f'data-signature="{signature}"' in page
+
+
+def test_the_signature_holds_still_when_nothing_happens(client, make_task):
+    """Elapsed time must not be in it, or the page would refresh every second."""
+    make_task(name="quiet")
+    first = client.get("/api/state", headers=SAME_SITE).json()["signature"]
+    time.sleep(1.1)
+    assert client.get("/api/state", headers=SAME_SITE).json()["signature"] == first
+
+
+@pytest.mark.parametrize("change", ["run", "notification", "disable", "edit"])
+def test_the_signature_moves_when_the_page_would(client, store, make_task, change):
+    task = make_task(name="watched")
+    before = client.get("/api/state", headers=SAME_SITE).json()["signature"]
+
+    if change == "run":
+        store.claim_run(task.id, config.utcnow())
+    elif change == "notification":
+        core.notify(store, task.id, None, "something", "happened")
+    elif change == "disable":
+        client.post(f"/tasks/{task.id}", data={"enabled": "false"}, headers=SAME_SITE)
+    else:
+        client.post(f"/tasks/{task.id}", data={"name": "renamed"}, headers=SAME_SITE)
+
+    assert client.get("/api/state", headers=SAME_SITE).json()["signature"] != before
+
+
+def test_a_run_in_flight_is_named_with_the_time_it_started(client, store, make_task):
+    """The clock is drawn in the browser, so the poll has to say from when."""
+    task = make_task(name="running")
+    run_id = store.claim_run(task.id, config.utcnow())
+    state = client.get("/api/state", headers=SAME_SITE).json()
+    assert [r["run"] for r in state["active"]] == [run_id]
+    assert state["active"][0]["started"] is not None
+
+
+def test_the_tail_starts_with_everything(client, cfg, store, make_task):
+    task = make_task(name="tailed")
+    run_id = store.claim_run(task.id, config.utcnow())
+    write_transcript(cfg.transcript_path(task.id, run_id), [
+        {"type": "assistant", "message": {"content": [
+            {"type": "text", "text": "first"}]}},
+        {"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "name": "Bash", "input": {"command": "date"}}]}},
+    ])
+    tail = client.get(f"/runs/{run_id}/rows", headers=SAME_SITE).json()
+    assert tail["count"] == 2
+    assert tail["active"] is True
+    assert "first" in tail["html"] and "Bash" in tail["html"]
+
+
+def test_the_tail_sends_only_what_the_page_has_not_got(client, cfg, store,
+                                                       make_task):
+    task = make_task(name="partly-read")
+    run_id = store.claim_run(task.id, config.utcnow())
+    write_transcript(cfg.transcript_path(task.id, run_id), [
+        {"type": "assistant", "message": {"content": [
+            {"type": "text", "text": "already shown"}]}},
+        {"type": "assistant", "message": {"content": [
+            {"type": "text", "text": "the new one"}]}},
+    ])
+    tail = client.get(f"/runs/{run_id}/rows?start=1", headers=SAME_SITE).json()
+    assert "already shown" not in tail["html"]
+    assert "the new one" in tail["html"]
+    assert tail["count"] == 2
+
+
+def test_a_growing_transcript_never_repeats_or_skips_a_row(client, cfg, store,
+                                                           make_task):
+    """The one thing paging by row index depends on.
+
+    A file being appended to while it is read ends mid-line, and the reader
+    yields no row for that line. When the rest of it lands the row appears
+    once, after the rows already sent and before anything written later, so
+    following the tail reconstructs the transcript exactly.
+    """
+    task = make_task(name="growing")
+    run_id = store.claim_run(task.id, config.utcnow())
+    path = cfg.transcript_path(task.id, run_id)
+    turn = '{"type": "assistant", "message": {"content": [{"type": "text", "text": "%s"}]}}\n'
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(turn % "one" + (turn % "two")[:40])
+
+    seen, start = [], 0
+    for more in ((turn % "two")[40:] + (turn % "three"), turn % "four"):
+        tail = client.get(f"/runs/{run_id}/rows?start={start}",
+                          headers=SAME_SITE).json()
+        seen.append(tail["html"])
+        start = tail["count"]
+        with open(path, "a") as f:
+            f.write(more)
+
+    tail = client.get(f"/runs/{run_id}/rows?start={start}", headers=SAME_SITE).json()
+    seen.append(tail["html"])
+    whole = "".join(seen)
+    assert [whole.count(word) for word in ("one", "two", "three", "four")] == [1, 1, 1, 1]
+    assert whole.index("one") < whole.index("two") < whole.index("three") \
+        < whole.index("four")
+
+
+def test_the_tail_reads_the_end_from_the_run_not_the_transcript(client, cfg,
+                                                                store, make_task):
+    """A killed run never writes the `result` event that would mark it done.
+
+    Believing the transcript would leave the page polling a run that ended
+    minutes ago, which is the state this whole mechanism exists to avoid being
+    stuck in.
+    """
+    task = make_task(name="killed-mid-sentence")
+    run_id = store.claim_run(task.id, config.utcnow())
+    write_transcript(cfg.transcript_path(task.id, run_id), [
+        {"type": "assistant", "message": {"content": [
+            {"type": "text", "text": "working"}]}},
+    ], tail='{"type": "assist')
+    assert client.get(f"/runs/{run_id}/rows", headers=SAME_SITE).json()["active"]
+
+    store.finish_run(run_id, "timeout", config.utcnow(), error="ran past its limit")
+    tail = client.get(f"/runs/{run_id}/rows", headers=SAME_SITE).json()
+    assert tail["active"] is False
+    assert tail["state"] == "timeout"
+
+
+def test_the_tail_renders_what_the_page_renders(client, cfg, store, make_task):
+    """One description of a turn, not two.
+
+    The page includes the same template the tail renders on its own, so a row
+    that arrives while you watch is the row you would have got by reloading.
+    """
+    task = make_task(name="one-renderer")
+    run_id = store.claim_run(task.id, config.utcnow())
+    write_transcript(cfg.transcript_path(task.id, run_id), [
+        {"type": "user", "message": {"content": [
+            {"type": "tool_result", "content": "boom", "is_error": True}]}},
+    ])
+    page = client.get(f"/runs/{run_id}", headers=SAME_SITE).text
+    tail = client.get(f"/runs/{run_id}/rows", headers=SAME_SITE).json()["html"]
+    assert tail.strip() in page
+
+
+def test_the_run_page_only_asks_for_a_tail_while_the_run_is_going(client, cfg,
+                                                                  store, make_task):
+    task = make_task(name="finished")
+    run_id = store.claim_run(task.id, config.utcnow())
+    assert 'data-live="1"' in client.get(f"/runs/{run_id}", headers=SAME_SITE).text
+
+    store.finish_run(run_id, "ok", config.utcnow(), exit_code=0)
+    assert 'data-live="1"' not in client.get(f"/runs/{run_id}", headers=SAME_SITE).text
+
+
+def test_a_run_with_nothing_yet_is_not_a_run_that_said_nothing(client, store,
+                                                               make_task):
+    """The same empty list means two different things, and only one is bad."""
+    task = make_task(name="just-started")
+    run_id = store.claim_run(task.id, config.utcnow())
+    assert "has not finished its first turn" in \
+        client.get(f"/runs/{run_id}", headers=SAME_SITE).text
+
+    store.finish_run(run_id, "timeout", config.utcnow())
+    assert "killed before it spoke" in \
+        client.get(f"/runs/{run_id}", headers=SAME_SITE).text
+
+
+def test_a_tail_of_an_unknown_run_is_a_404(client):
+    assert client.get("/runs/r_nope/rows", headers=SAME_SITE).status_code == 404
+
+
+def test_the_health_line_counts_in_the_browser(client, store):
+    """"Ticked 42s ago" would be a lie that grew for the five minutes between
+    ticks, so the number is a clock the page draws rather than a rendered one."""
+    store.set_meta("last_tick", config.utcnow().isoformat())
+    body = client.get("/", headers=SAME_SITE).text
+    assert 'class="elapsed" data-since=' in body
+    assert "s ago" not in body

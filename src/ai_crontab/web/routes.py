@@ -9,6 +9,8 @@ The writing half is guarded before it is routed, in `app.guard`. Read that
 before adding a route here.
 """
 
+import hashlib
+
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
@@ -16,7 +18,7 @@ from .. import config as config_module
 from .. import core
 from .. import tick as tick_module
 from ..core import TaskNotFound
-from ..model import from_iso
+from ..model import ACTIVE, from_iso, to_iso
 from . import transcript as transcript_module
 
 router = APIRouter()
@@ -32,12 +34,9 @@ LATE_AFTER_INTERVALS = 2
 def dashboard(request: Request):
     cfg = load_config(request)
     with core.open_store(cfg) as store:
-        return _render(request, "dashboard.html", cfg, {
-            "tasks": [_task_view(store, cfg, t) for t in store.list_tasks()],
-            "active": store.active_runs(),
-            "unread": store.unread_count(),
-            "health": _health(store, cfg),
-        })
+        state = _schedule_state(store, cfg)
+        return _render(request, "dashboard.html", cfg,
+                       {**state, "signature": _signature(state)})
 
 
 @router.get("/tasks/{ref}", response_class=HTMLResponse)
@@ -68,6 +67,7 @@ def run_page(request: Request, run_id: str):
             "view": _run_view(cfg, run),
             "task": task,
             "transcript": parsed,
+            "live": run.state == ACTIVE,
             "unread": store.unread_count(),
         })
 
@@ -87,31 +87,119 @@ def inbox(request: Request):
 
 @router.get("/api/state")
 def api_state(request: Request):
-    """The dashboard as JSON, for the poll that keeps an in-flight run visible.
+    """The schedule page as JSON, for the poll that keeps it current.
 
-    Deliberately the same numbers the dashboard renders and nothing more: this
-    is a refresh channel, not an API for programs. A program has the library.
+    Deliberately the same numbers the page renders and nothing more: this is a
+    refresh channel, not an API for programs. A program has the library.
+
+    `signature` is what the poll actually reads. Everything beside it is here
+    so that a person can see what the page is comparing.
     """
     cfg = load_config(request)
     with core.open_store(cfg) as store:
-        health = _health(store, cfg)
+        state = _schedule_state(store, cfg)
         return JSONResponse({
-            "unread": store.unread_count(),
-            "active": [{"run": r.id, "task": r.task_id} for r in store.active_runs()],
+            "signature": _signature(state),
+            "unread": state["unread"],
+            "active": [
+                {
+                    "run": r.id,
+                    "task": r.task_id,
+                    "started": _iso_local(cfg, r.started_at),
+                }
+                for r in state["active"]
+            ],
             "tasks": [
                 {
-                    "id": t.id,
-                    "name": t.name,
-                    "enabled": t.enabled,
-                    "next_run": _iso_local(cfg, t.next_run),
+                    "id": v["task"].id,
+                    "name": v["task"].name,
+                    "enabled": v["task"].enabled,
+                    "next_run": _iso_local(cfg, v["task"].next_run),
                 }
-                for t in store.list_tasks()
+                for v in state["tasks"]
             ],
             "health": {
-                "state": health["state"],
-                "last_tick": _iso_local(cfg, health["last_tick"]),
+                "state": state["health"]["state"],
+                "last_tick": _iso_local(cfg, state["health"]["last_tick"]),
             },
         })
+
+
+@router.get("/runs/{run_id}/rows")
+def run_rows(request: Request, run_id: str, start: int = 0):
+    """The turns of a run past the ones the caller already has, rendered.
+
+    The tail a run's page polls while the agent is still working. `start` is
+    how many rows that page is showing; the reply carries the ones after it as
+    the same HTML the page would have been served with, because a browser that
+    built its own rows would be a second description of what a turn looks like
+    ([D26](SPEC.md#resolved-decisions)).
+
+    Paging by row index is sound only because rows are append-only, and they
+    are for the reason the reader was written: a line it cannot parse yields no
+    row at all. The half-written last line of a file being appended to right
+    now becomes a row when the rest of it lands, and never rewrites one already
+    sent.
+
+    `active` is read from the run's row rather than from the transcript,
+    because a run killed at its limit never writes the `result` event that
+    would otherwise mark the end.
+    """
+    cfg = load_config(request)
+    with core.open_store(cfg) as store:
+        run = store.get_run(run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail=f"no run {run_id}")
+        parsed = transcript_module.read(cfg.transcript_path(run.task_id, run.id))
+    rows = parsed.rows[max(start, 0):]
+    template = request.app.state.templates.env.get_template("_rows.html")
+    return JSONResponse({
+        "html": template.render(rows=rows) if rows else "",
+        "count": len(parsed.rows),
+        "state": run.state,
+        "active": run.state == ACTIVE,
+    })
+
+
+def _schedule_state(store, cfg):
+    """Everything the schedule page shows, gathered once.
+
+    The page is rendered from this and `/api/state` serialises it, so the poll
+    that decides the page is out of date is comparing against the numbers the
+    page was built from. Two queries meant to agree, with nothing making them,
+    is how a live view starts contradicting the page under it.
+    """
+    return {
+        "tasks": [_task_view(store, cfg, t) for t in store.list_tasks()],
+        "active": store.active_runs(),
+        "unread": store.unread_count(),
+        "health": _health(store, cfg),
+    }
+
+
+def _signature(state):
+    """A short string that changes when anything on the schedule page changes.
+
+    The page carries the signature it was rendered with and the poll refreshes
+    it when the server answers with a different one. That is cheaper than
+    diffing the page, and it means a column added below is covered by adding
+    its field here rather than by writing a second comparison of its own.
+
+    Elapsed time is deliberately not part of it. A run in flight would then
+    change the signature every second and refresh the page out from under
+    whoever was reading it; the clock beside a running run is drawn by the
+    browser instead.
+    """
+    parts = [state["health"]["state"], to_iso(state["health"]["last_tick"]),
+             str(state["unread"])]
+    parts += [run.id for run in state["active"]]
+    for view in state["tasks"]:
+        task, last = view["task"], view["last_run"]
+        parts += [task.id, task.name, task.schedule, str(task.enabled),
+                  to_iso(task.next_run),
+                  last["run"].id + last["run"].state if last else "-"]
+    joined = "\x1f".join(part or "" for part in parts)
+    return hashlib.sha1(joined.encode()).hexdigest()[:16]
 
 
 def load_config(request):
