@@ -33,6 +33,14 @@ task starts. Every tick runs everything that became due since the last one, so
 a five-minute interval and an hourly one differ in whether a task due at 09:00
 starts at 09:05 or 10:00, never in whether it runs at all.
 
+Check what you wrote against what the dashboard reports, because the interval
+you meant and the interval cron read are easy to part company. Hourly is
+`0 * * * *`. It is not `* */1 * * *`: cron fires when every field matches, and
+that line leaves the minute field at `*`, so it means every minute of every
+hour. The tool cannot warn you, since it never sees your crontab, but the
+dashboard shows when the last tick was and that is where the difference
+appears.
+
 The two halves of the line record different things, and one file cannot do both
 jobs:
 

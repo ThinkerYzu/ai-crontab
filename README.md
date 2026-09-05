@@ -173,13 +173,19 @@ exposing that port is not the small thing it looks like.
 
 ```bash
 pip install -e ".[dev,web]"
-pytest -q          # 174 tests, about 20 seconds
+pytest -q          # 177 tests, about 23 seconds
 ```
 
 The suite needs no network and starts no agent that costs money. A fake agent
 in `tests/fake_agent.py` speaks the same `stream-json` protocol a real run
 does, so every timing rule (the warning, the kill, the process-group cleanup)
 is tested in seconds rather than minutes.
+
+Three tests in `tests/test_web_browser.py` drive headless Chromium at a real
+server over the DevTools protocol, because what the web interface does with a
+route's reply happens in the browser and a test of the reply cannot see it.
+They skip where there is no Chromium, Chrome or `websockets`, so neither CI nor
+a fresh checkout needs a browser.
 
 Every push runs that suite on Python 3.11 through 3.14, then builds the wheel
 and installs it into an empty virtualenv to check that what ships actually
