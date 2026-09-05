@@ -3,7 +3,7 @@
 import argparse
 import sys
 
-from . import config, core, schedule, supervisor, tick
+from . import __version__, config, core, schedule, supervisor, tick
 from .core import DuplicateName, TaskNotFound
 from .schedule import ScheduleError
 
@@ -30,6 +30,8 @@ def _parser():
         description="Run AI agent tasks on a schedule, unattended.",
     )
     parser.add_argument("--root", help="state directory (default ~/.ai-crontab)")
+    parser.add_argument("--version", action="version",
+                        version=f"ai-crontab {__version__}")
     subs = parser.add_subparsers(dest="command", required=True)
 
     p = subs.add_parser("add", help="add a task")

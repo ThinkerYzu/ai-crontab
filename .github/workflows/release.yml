@@ -1,0 +1,61 @@
+name: release
+
+# A pushed version tag is the whole trigger: everything below is what turns
+# `git push origin v0.1.0` into a release page with a wheel attached to it.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write   # to create the release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # First, so a tag that names the wrong version costs nothing but a
+      # deleted tag. scripts/release-check.py is the same check you run before
+      # tagging, and its output is what the release page will say.
+      - name: The tag matches the version, and has notes
+        run: python scripts/release-check.py "$GITHUB_REF_NAME" > release-notes.md
+
+      - name: Tests
+        run: |
+          pip install -e ".[dev,web]"
+          pytest -q
+
+      - name: Build the sdist and the wheel
+        run: |
+          pip install build
+          python -m build
+
+      - name: Install the wheel somewhere clean and run it
+        run: |
+          python -m venv /tmp/smoke
+          /tmp/smoke/bin/pip install --quiet dist/*.whl
+          got=$(/tmp/smoke/bin/ai-crontab --version | awk '{print $2}')
+          test "$got" = "${GITHUB_REF_NAME#v}" || {
+            echo "tag ${GITHUB_REF_NAME} carries a wheel that says $got"; exit 1; }
+          /tmp/smoke/bin/ai-crontab --root /tmp/smoke-root list
+
+      # A tag with anything after the third number (v0.2.0rc1) is a prerelease,
+      # so it does not become the "Latest" release people are shown.
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            prerelease=""
+          else
+            prerelease="--prerelease"
+          fi
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file release-notes.md \
+            $prerelease \
+            dist/*

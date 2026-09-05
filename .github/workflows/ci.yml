@@ -1,0 +1,64 @@
+name: tests
+
+# Every push and pull request. The release workflow runs the same suite again
+# before it builds anything, so a tag is never the first time these ran.
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    name: pytest on ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Every version pyproject.toml's requires-python claims to support.
+        python: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install -e ".[dev,web]"
+      # The suite needs no network and starts no agent that costs money: a fake
+      # agent speaks the same stream-json a real run does.
+      - run: pytest -q
+
+  package:
+    name: build and install the wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # Catches "bumped the version, forgot the notes" here rather than at the
+      # tag, when the fix is a commit instead of a deleted release.
+      - name: The version has release notes
+        run: python scripts/release-check.py
+
+      - name: Build the sdist and the wheel
+        run: |
+          pip install build
+          python -m build
+
+      # Installing what we built, in a virtualenv holding nothing else, is the
+      # only check that the packaged data files and the entry point are really
+      # in the wheel. An editable install in the checkout would pass either way.
+      - name: Install it somewhere clean and run it
+        run: |
+          python -m venv /tmp/smoke
+          /tmp/smoke/bin/pip install --quiet dist/*.whl
+          /tmp/smoke/bin/ai-crontab --version
+          /tmp/smoke/bin/ai-crontab --root /tmp/smoke-root list
+          meta=$(/tmp/smoke/bin/pip show ai-crontab | awk '/^Version:/ {print $2}')
+          cli=$(/tmp/smoke/bin/ai-crontab --version | awk '{print $2}')
+          test "$meta" = "$cli" || {
+            echo "wheel metadata says $meta, the command says $cli"; exit 1; }

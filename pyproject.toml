@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ai-crontab"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Schedule AI agent tasks, with a pull-only notification inbox"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -35,6 +35,9 @@ Issues = "https://github.com/ThinkerYzu/ai-crontab/issues"
 
 [project.scripts]
 ai-crontab = "ai_crontab.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "ai_crontab.__version__" }
 
 [tool.setuptools.packages.find]
 where = ["src"]

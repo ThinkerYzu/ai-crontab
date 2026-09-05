@@ -417,12 +417,14 @@ place to look when a task did something surprising.
 
 ## Checking a running installation
 
-Three commands answer three different questions:
+Three commands answer three different questions, and a fourth says which
+version is answering them:
 
 ```bash
 ai-crontab history gtk-triage   # did it run, and how did it end
 ai-crontab notify list          # did it speak, and only when it should have
 cat ~/.ai-crontab/last-tick     # is the scheduler alive
+ai-crontab --version            # which build this is
 ```
 
 **An empty inbox is the expected result.** A task that files nothing for three

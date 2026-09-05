@@ -1,5 +1,7 @@
 # ai-crontab
 
+[![tests](https://github.com/ThinkerYzu/ai-crontab/actions/workflows/ci.yml/badge.svg)](https://github.com/ThinkerYzu/ai-crontab/actions/workflows/ci.yml)
+
 Run AI agent tasks on a schedule, unattended, and let them reach you through an
 inbox you read when you have time.
 
@@ -51,6 +53,9 @@ cd ai-crontab
 python3 -m venv .venv && . .venv/bin/activate
 pip install -e .          # add [web] for the browser interface
 ```
+
+The wheel attached to the [latest release](https://github.com/ThinkerYzu/ai-crontab/releases/latest) works too, if
+you would rather not keep a checkout.
 
 Then point it at your `claude` binary, because cron's `PATH` will not find one
 installed under your home directory:
@@ -161,18 +166,25 @@ exposing that port is not the small thing it looks like.
 - **[docs/USAGE.md](docs/USAGE.md)** covers every command, the config file, how
   to write a task prompt that works unattended, the tools an agent can call
   back through, and how to tell a healthy installation from a broken one.
+- **[CHANGELOG.md](CHANGELOG.md)** is what changed in each release.
+- **[docs/RELEASING.md](docs/RELEASING.md)** is how a release is cut.
 
 ## Development
 
 ```bash
 pip install -e ".[dev,web]"
-pytest -q          # 122 tests, about 19 seconds
+pytest -q          # 174 tests, about 20 seconds
 ```
 
 The suite needs no network and starts no agent that costs money. A fake agent
 in `tests/fake_agent.py` speaks the same `stream-json` protocol a real run
 does, so every timing rule (the warning, the kill, the process-group cleanup)
 is tested in seconds rather than minutes.
+
+Every push runs that suite on Python 3.11 through 3.14, then builds the wheel
+and installs it into an empty virtualenv to check that what ships actually
+runs. A pushed `v*` tag turns into a release page with the wheel attached;
+[docs/RELEASING.md](docs/RELEASING.md) has the procedure.
 
 ## License
 
