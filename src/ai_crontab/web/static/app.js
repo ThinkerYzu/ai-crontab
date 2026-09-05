@@ -26,6 +26,27 @@
     flash.hidden = false;
   }
 
+  // Go where the write said to go, carrying its message in the fragment.
+  //
+  // Most writes send you back to the page you were already on: an edit, an
+  // enable, anything on the inbox. Assigning a URL that differs from this one
+  // only in its fragment is a same-document navigation, so the browser moves
+  // the fragment and does not reload — the page keeps showing what it showed
+  // before the write, and `say` never runs again to explain why. Asking for
+  // the reload outright is what makes a save visible. The fragment survives
+  // one, so the message still arrives the way it does from any other page.
+  function go(where, message) {
+    var target = new URL(where, window.location.href);
+    target.hash = encodeURIComponent(message);
+    if (target.pathname === window.location.pathname
+        && target.search === window.location.search) {
+      window.location.hash = target.hash;
+      window.location.reload();
+    } else {
+      window.location.assign(target.href);
+    }
+  }
+
   function submit(form) {
     var body = new URLSearchParams(new FormData(form));
     fetch(form.action, {
@@ -44,7 +65,7 @@
         say(result.data.detail || "the server refused that", true);
         return;
       }
-      window.location = result.data.redirect + "#" + encodeURIComponent(result.data.message);
+      go(result.data.redirect, result.data.message);
     }).catch(function (err) {
       say(String(err), true);
     });

@@ -5,7 +5,12 @@ Notable changes per release. The version at the top of a section is the one
 
 ## Unreleased
 
-Nothing yet.
+- **Fixed:** a write in the web interface left the page showing what it showed
+  before. Most writes send the browser back to the page the form was on — an
+  edit, an enable, anything on the inbox — and a URL that differs only in its
+  fragment is a same-document navigation, so the page never reloaded and never
+  said "saved". The change landed in the store either way, which is what made
+  it look like the save had been ignored.
 
 ## 0.1.0 - 2026-09-04
 
