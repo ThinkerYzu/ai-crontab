@@ -47,9 +47,19 @@
     }
   }
 
+  // Where a form posts, read from its markup rather than from `form.action`.
+  //
+  // A control named `action` shadows the form's own property: the inbox forms
+  // carry `<input name="action" value="delete">`, so `form.action` there is
+  // that input, which stringifies to "[object HTMLInputElement]" and resolves
+  // to a path nothing serves. The attribute is what the template wrote.
+  function target(form) {
+    return new URL(form.getAttribute("action") || "", window.location.href).href;
+  }
+
   function submit(form) {
     var body = new URLSearchParams(new FormData(form));
-    fetch(form.action, {
+    fetch(target(form), {
       method: "POST",
       headers: {
         "X-AI-Crontab": "1",

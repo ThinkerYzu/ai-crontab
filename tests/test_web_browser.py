@@ -235,3 +235,53 @@ def test_clearing_the_inbox_empties_it_on_screen(page, served, store, make_task)
     assert "something happened" not in page.evaluate("document.body.textContent")
     assert "1 marked read" in page.evaluate(
         "document.getElementById('flash').textContent")
+
+
+def test_deleting_one_notification_removes_it(page, served, store, make_task):
+    """A form whose field is named `action` shadows `form.action`.
+
+    The per-note forms post an `action` field, so in a browser `form.action`
+    is that input rather than the URL, and posting to its string form reached
+    a path nothing serves. The route was never called, so no route test could
+    see it; only a browser resolves `form.action`. The confirm dialog is
+    answered from here because a headless tab would otherwise wait on it.
+    """
+    task = make_task(name="noisy")
+    keep = core.notify(store, task.id, None, "keep this one")
+    drop = core.notify(store, task.id, None, "drop this one")
+    page.visit(f"{served}/inbox")
+
+    page.stamp()
+    page.evaluate(f"""(() => {{
+      window.confirm = () => true;
+      document.querySelector(
+        'form[action="/inbox/{drop}"] input[value=delete]').form
+        .querySelector('button').click();
+    }})()""")
+    wait_until(lambda: not page.stamp_survived(), "the page to reload", 10)
+    page.settle()
+
+    assert store.get_notification(drop) is None
+    assert store.get_notification(keep) is not None
+    body = page.evaluate("document.body.textContent")
+    assert "drop this one" not in body
+    assert "keep this one" in body
+    assert page.evaluate("document.getElementById('flash').textContent") == "deleted"
+
+
+def test_marking_one_notification_read_clears_it(page, served, store, make_task):
+    """The other per-note button, built on the same shadowed form."""
+    task = make_task(name="noisy")
+    note = core.notify(store, task.id, None, "read me")
+    page.visit(f"{served}/inbox")
+
+    page.stamp()
+    page.evaluate(f"""document.querySelector(
+      'form[action="/inbox/{note}"] input[value=read]').form
+      .querySelector('button').click()""")
+    wait_until(lambda: not page.stamp_survived(), "the page to reload", 10)
+    page.settle()
+
+    assert not store.get_notification(note).is_unread
+    assert "read me" not in page.evaluate("document.body.textContent")
+    assert page.evaluate("document.getElementById('flash').textContent") == "marked read"

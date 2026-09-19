@@ -104,6 +104,11 @@ def test_a_killed_run_leaves_no_children_behind(cfg, store, make_task, tmp_path)
 
     assert run.state == model.TIMEOUT
     child_pid = int(marker.read_text())
+    # A killed grandchild is a zombie until init reaps it, which takes a
+    # moment; `/proc/<pid>` exists for a zombie, so give the reaper a second.
+    deadline = time.monotonic() + 2
+    while Path(f"/proc/{child_pid}").exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
     assert not Path(f"/proc/{child_pid}").exists(), "the agent's child outlived the kill"
 
 

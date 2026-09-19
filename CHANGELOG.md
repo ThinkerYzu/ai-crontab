@@ -11,6 +11,10 @@ Notable changes per release. The version at the top of a section is the one
   fragment is a same-document navigation, so the page never reloaded and never
   said "saved". The change landed in the store either way, which is what made
   it look like the save had been ignored.
+- **Fixed:** the inbox's per-notification `Delete` and `Mark read` buttons
+  answered "Not Found" and did nothing. Their forms carry a field named
+  `action`, which in a browser shadows the form's own `action` property, so
+  the request went to a path nothing serves. `Mark all read` was unaffected.
 
 ## 0.1.0 - 2026-09-04
 
