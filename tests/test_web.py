@@ -183,6 +183,63 @@ def test_dashboard_says_when_there_is_nothing(client):
     assert "No tasks" in client.get("/", headers=SAME_SITE).text
 
 
+@pytest.mark.parametrize("state", ["ok", "active", "failed", "timeout", "lost", None])
+def test_schedule_hides_only_successful_completed_one_time_tasks(
+        client, store, make_task, soon, state):
+    task = make_task(name="one-time-probe", schedule=soon)
+    task.next_run = None
+    store.update_task(task)
+    if state is not None:
+        run_id = store.claim_run(task.id, config.utcnow())
+        if state != "active":
+            store.finish_run(run_id, state, config.utcnow())
+
+    page = client.get("/", headers=SAME_SITE).text
+    poll = client.get("/api/state", headers=SAME_SITE).json()
+    assert (task.name in page) == (state != "ok")
+    assert (task.id in [t["id"] for t in poll["tasks"]]) == (state != "ok")
+    assert f'data-signature="{poll["signature"]}"' in page
+    assert 'href="/?completed=1">Show completed</a>' in page
+
+    page_all = client.get("/?completed=1", headers=SAME_SITE).text
+    poll_all = client.get("/api/state?completed=1", headers=SAME_SITE).json()
+    assert task.name in page_all
+    assert task.id in [t["id"] for t in poll_all["tasks"]]
+    assert f'data-signature="{poll_all["signature"]}"' in page_all
+    assert 'data-poll="/api/state?completed=1"' in page_all
+    assert 'href="/">Hide completed</a>' in page_all
+    assert client.get(f"/tasks/{task.id}", headers=SAME_SITE).status_code == 200
+
+
+def test_successful_recurring_and_pending_one_time_tasks_remain_visible(
+        client, store, make_task, soon):
+    recurring = make_task(name="recurring")
+    disabled = make_task(name="paused")
+    disabled.enabled = False
+    disabled.next_run = None
+    store.update_task(disabled)
+    pending = make_task(name="pending", schedule=soon)
+    for task in (recurring, disabled, pending):
+        run_id = store.claim_run(task.id, config.utcnow())
+        store.finish_run(run_id, "ok", config.utcnow())
+    page = client.get("/", headers=SAME_SITE).text
+    assert all(task.name in page for task in (recurring, disabled, pending))
+
+
+def test_schedule_signature_changes_when_a_one_time_run_finishes(
+        client, store, make_task, soon):
+    task = make_task(schedule=soon)
+    task.next_run = None
+    store.update_task(task)
+    run_id = store.claim_run(task.id, config.utcnow())
+    before = client.get("/api/state", headers=SAME_SITE).json()
+    assert task.id in [t["id"] for t in before["tasks"]]
+    store.finish_run(run_id, "ok", config.utcnow())
+    after = client.get("/api/state", headers=SAME_SITE).json()
+    assert after["signature"] != before["signature"]
+    assert task.id not in [t["id"] for t in after["tasks"]]
+
+
 def test_health_reports_a_missing_tick(client, cfg, store):
     """Before the first tick there is nothing to compare against, and that is
     not the same as the scheduler being broken."""

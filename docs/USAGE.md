@@ -320,6 +320,11 @@ and a page per run rendering that run's transcript as turns, with the tool
 calls, their results, and what it cost. Reading a transcript is the thing the
 command line does badly, and it is most of why the interface exists.
 
+The Schedule tab hides completed one-time tasks by default once their latest
+run succeeds and they have no next run. Use **Show completed** to include them.
+Running and unsuccessful tasks stay visible, as do recurring and never-run
+tasks. Hiding a task keeps its detail page, history and notifications.
+
 It also writes. Everything the CLI can do to a task, the interface can do:
 add one, edit its prompt and schedule, enable and disable it, delete it, and
 run it now. The inbox can be marked read, one notification at a time or all of

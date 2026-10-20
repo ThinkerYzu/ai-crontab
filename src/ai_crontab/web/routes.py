@@ -18,7 +18,7 @@ from .. import config as config_module
 from .. import core
 from .. import tick as tick_module
 from ..core import TaskNotFound
-from ..model import ACTIVE, from_iso, to_iso
+from ..model import ACTIVE, OK, ONCE, from_iso, to_iso
 from . import transcript as transcript_module
 
 router = APIRouter()
@@ -34,7 +34,8 @@ LATE_AFTER_INTERVALS = 2
 def dashboard(request: Request):
     cfg = load_config(request)
     with core.open_store(cfg) as store:
-        state = _schedule_state(store, cfg)
+        state = _schedule_state(
+            store, cfg, show_completed=request.query_params.get("completed") == "1")
         return _render(request, "dashboard.html", cfg,
                        {**state, "signature": _signature(state)})
 
@@ -97,7 +98,8 @@ def api_state(request: Request):
     """
     cfg = load_config(request)
     with core.open_store(cfg) as store:
-        state = _schedule_state(store, cfg)
+        state = _schedule_state(
+            store, cfg, show_completed=request.query_params.get("completed") == "1")
         return JSONResponse({
             "signature": _signature(state),
             "unread": state["unread"],
@@ -161,7 +163,7 @@ def run_rows(request: Request, run_id: str, start: int = 0):
     })
 
 
-def _schedule_state(store, cfg):
+def _schedule_state(store, cfg, show_completed=False):
     """Everything the schedule page shows, gathered once.
 
     The page is rendered from this and `/api/state` serialises it, so the poll
@@ -169,8 +171,17 @@ def _schedule_state(store, cfg):
     page was built from. Two queries meant to agree, with nothing making them,
     is how a live view starts contradicting the page under it.
     """
+    tasks = [_task_view(store, cfg, t) for t in store.list_tasks()]
+    if not show_completed:
+        tasks = [v for v in tasks if not (
+            v["task"].schedule_kind == ONCE
+            and v["task"].next_run is None
+            and v["last_run"] is not None
+            and v["last_run"]["run"].state == OK
+        )]
     return {
-        "tasks": [_task_view(store, cfg, t) for t in store.list_tasks()],
+        "show_completed": show_completed,
+        "tasks": tasks,
         "active": store.active_runs(),
         "unread": store.unread_count(),
         "health": _health(store, cfg),

@@ -26,10 +26,12 @@
 
 {# What the poll compares against. An empty signature would be a page that
    never refreshes, so it is rendered here beside what it describes. #}
-<div id="live" data-poll="/api/state" data-signature="{{ signature }}" hidden></div>
+<div id="live" data-poll="/api/state{{ '?completed=1' if show_completed else '' }}" data-signature="{{ signature }}" hidden></div>
+
+<p>{% if show_completed %}<a href="/">Hide completed</a>{% else %}<a href="/?completed=1">Show completed</a>{% endif %}</p>
 
 {% if not tasks %}
-  <p class="empty">No tasks. Add one below, or with <code>ai-crontab add</code>.</p>
+  <p class="empty">No tasks{{ '' if show_completed else ' to show' }}. Add one below, or with <code>ai-crontab add</code>.</p>
 {% else %}
 <table>
   <tr><th>Task</th><th>Schedule</th><th>Next run</th><th>Last run</th></tr>

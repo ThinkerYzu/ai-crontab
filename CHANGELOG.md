@@ -5,6 +5,10 @@ Notable changes per release. The version at the top of a section is the one
 
 ## Unreleased
 
+- **Changed:** the Schedule tab hides completed one-time tasks by default.
+  “Show completed” includes them again; running and unsuccessful tasks remain
+  visible, and history and notifications are retained.
+
 - **Fixed:** a write in the web interface left the page showing what it showed
   before. Most writes send the browser back to the page the form was on — an
   edit, an enable, anything on the inbox — and a URL that differs only in its
